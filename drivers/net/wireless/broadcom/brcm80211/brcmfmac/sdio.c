@@ -295,7 +295,7 @@ struct rte_console {
  * max out at a 1 second (1000000us).
  */
 #undef PMU_MAX_TRANSITION_DLY
-#define PMU_MAX_TRANSITION_DLY 1000000
+#define PMU_MAX_TRANSITION_DLY 5000000
 
 /* Value for ChipClockCSR during initial setup */
 #define BRCMF_INIT_CLKCTL1	(SBSDIO_FORCE_HW_CLKREQ_OFF |	\
