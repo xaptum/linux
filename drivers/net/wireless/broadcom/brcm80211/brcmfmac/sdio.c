@@ -4043,6 +4043,16 @@ static void brcmf_sdio_firmware_callback(struct device *dev, int err,
 		goto fail;
 	bus->alp_only = false;
 
+	/*
+	 * The later call to brcmf_sdio_clkctl() times out if
+	 * called too soon after downloading the firmware, so
+	 * sleep for a bit.
+	 *
+	 * FIXME: There must be a better way to fix this than
+	 * just sleeping.
+	 */
+	msleep(4000);
+
 	/* Start the watchdog timer */
 	bus->sdcnt.tickcnt = 0;
 	brcmf_sdio_wd_timer(bus, true);
