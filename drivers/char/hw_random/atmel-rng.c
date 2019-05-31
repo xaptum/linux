@@ -84,6 +84,7 @@ static int atmel_trng_probe(struct platform_device *pdev)
 	atmel_trng_enable(trng);
 	trng->rng.name = pdev->name;
 	trng->rng.read = atmel_trng_read;
+	trng->rng.quality = 512;
 
 	ret = hwrng_register(&trng->rng);
 	if (ret)

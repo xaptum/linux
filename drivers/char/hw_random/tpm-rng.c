@@ -29,8 +29,9 @@ static int tpm_rng_read(struct hwrng *rng, void *data, size_t max, bool wait)
 }
 
 static struct hwrng tpm_rng = {
-	.name = MODULE_NAME,
-	.read = tpm_rng_read,
+	.name    = MODULE_NAME,
+	.read    = tpm_rng_read,
+	.quality = 512,
 };
 
 static int __init rng_init(void)
