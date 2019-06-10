@@ -11,8 +11,6 @@
 #include <linux/net.h>
 #include <net/sock.h>
 
-#define PF_XPT PF_NFC
-
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
 
@@ -175,7 +173,7 @@ static int f_psock_sock_bind(struct socket *sock, struct sockaddr *addr, int add
  */
 static const struct proto_ops f_psock_ops =
 {
-	.family		= PF_XPT,
+	.family		= PF_PSOCK,
 	.owner		= THIS_MODULE,
 	.release	= f_psock_sock_release,
 	.bind		= f_psock_sock_bind,
@@ -222,7 +220,7 @@ static struct sock *f_psock_sock_alloc(struct net *net, struct socket *sock, int
 	struct sock *sk;
 
 	printk( KERN_INFO "psock_socket: Allocating sk socket\n" );
-	sk = sk_alloc(net, PF_XPT, prio, &f_psock_proto , kern);
+	sk = sk_alloc(net, PF_PSOCK, prio, &f_psock_proto , kern);
 
 	if ( !sk )
 	{
@@ -286,7 +284,7 @@ static int f_psock_sock_create( struct net *net, struct socket *sock, int protoc
  */
 static const struct net_proto_family f_psock_family_ops = 
 {
-	.family		= PF_XPT,
+	.family		= PF_PSOCK,
 	.owner		= THIS_MODULE,
 	.create		= f_psock_sock_create
 };
