@@ -81,6 +81,4 @@ typedef struct psock_proxy_msg
 
 void psock_proxy_msg_to_packet(psock_proxy_msg_t *msg, psock_proxy_msg_packet_t *packet);
 void psock_proxy_packet_to_msg(psock_proxy_msg_packet_t *packet, psock_proxy_msg_t *msg);
-
-void psock_debug_hex_dump (char *desc, void *addr, int len);
 #endif 

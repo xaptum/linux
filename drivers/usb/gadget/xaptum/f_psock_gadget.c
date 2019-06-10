@@ -393,7 +393,6 @@ static int alloc_msg_send_request( struct usb_composite_dev *cdev, struct f_psoc
 		memcpy( packet->data, msg->data, data_len );
 	}
 
-	psock_debug_hex_dump("Sending data to USB", packet, sizeof(psock_proxy_msg_packet_t)+data_len);
 
 	// We put a pointer to the msg in the context
 	out_req->context = msg;
