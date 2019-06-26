@@ -13,6 +13,7 @@
 
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
+#define PSOCK_MAX_TRANSMIT_BYTES 128
 
 /**
  * psock local socket data
@@ -118,8 +119,13 @@ static int f_psock_sock_sendmsg( struct socket *sock,
 				 struct msghdr *msg, size_t len )
 {
 	int res, r;
-	void *data = kmalloc( len, GFP_KERNEL );
+	void *data;
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
+
+	if(len>PSOCK_MAX_TRANSMIT_BYTES)
+		len=PSOCK_MAX_TRANSMIT_BYTES;
+
+	data = kmalloc( len, GFP_KERNEL );
 
 	printk( KERN_INFO "psock_socket: sendmsg :%d %ld\n", psk->psk.local_id, len );
 	r = copy_from_iter( data, len,  &msg->msg_iter);
