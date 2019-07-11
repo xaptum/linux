@@ -10,6 +10,7 @@
 
 #include <linux/net.h>
 #include <net/sock.h>
+#include <linux/poll.h>
 
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
@@ -102,17 +103,6 @@ static int f_psock_sock_connect(struct socket *sock, struct sockaddr *addr, int 
 }
 
 /**
- * Function for getname
- */
-/*
-static int f_psock_sock_getname(struct socket *sock, struct sockaddr *addr, int peer )
-{
-	printk( KERN_INFO "psock getname\n" );
-	return 0;
-}
-*/
-
-/**
  * Function for sending a msg over the socket
  */
 static int f_psock_sock_sendmsg( struct socket *sock,
@@ -175,6 +165,53 @@ static int f_psock_sock_bind(struct socket *sock, struct sockaddr *addr, int add
 }
 
 /**
+ * Create dummy functions to help reduce null ptr / bad PC errors caused by jumping to unimplemented ops
+ */
+static int f_psock_listen(struct socket *sock, int len)
+{
+	printk( KERN_ERR "f_psock_listen: Function not implemented\n" );
+	return -1;
+}
+
+static int f_psock_sock_getname(struct socket *sock,struct sockaddr *addr,
+                                      int *sockaddr_len, int peer)
+{
+	printk( KERN_ERR "f_psock_sock_getname: Function not implemented\n" );
+	return -1;
+}
+
+static int f_psock_accept(struct socket *sock, struct socket *newsock, int flags, bool kern)
+{
+	printk( KERN_ERR "f_psock_accept: Function not implemented\n" );
+	return -1;
+}
+
+static int f_psock_getsockopt(struct socket *sock, int level,
+				      int optname, char __user *optval, int __user *optlen)
+{
+	printk( KERN_ERR "f_psock_getsockopt: Function not implemented\n" );
+	return -1;
+}
+
+static int f_psock_setsockopt(struct socket *sock, int level,
+				      int optname, char __user *optval, unsigned int optlen)
+{
+	printk( KERN_ERR "f_psock_setsockopt: Function not implemented\n" );
+	return -1;
+}
+
+static int f_psock_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
+{
+	printk( KERN_ERR "f_psock_ioctl: Function not implemented\n" );
+	return -1;
+}
+static unsigned int f_psock_poll(struct file *file, struct socket *sock,
+				      struct poll_table_struct *wait)
+{
+	printk( KERN_ERR "f_psock_poll: Function not implemented\n" );
+	return POLLOUT | POLLIN;
+}
+/**
  * Operation definitions for the psock type
  */
 static const struct proto_ops f_psock_ops =
@@ -184,16 +221,16 @@ static const struct proto_ops f_psock_ops =
 	.release	= f_psock_sock_release,
 	.bind		= f_psock_sock_bind,
 	.connect	= f_psock_sock_connect,
-	.listen		= NULL,
-	.accept		= NULL,
-	.getname 	= NULL, // f_psock_sock_getname,
+	.listen		= f_psock_listen,
+	.accept		= f_psock_accept,
+	.getname 	= f_psock_sock_getname,
 	.sendmsg	= f_psock_sock_sendmsg,
 	.recvmsg	= f_psock_sock_recvmsg,
 	.shutdown	= f_psock_sock_shutdown,
-	.setsockopt	= NULL,
-	.getsockopt	= NULL,
-	.ioctl		= NULL,
-	.poll		= NULL,
+	.setsockopt	= f_psock_setsockopt,
+	.getsockopt	= f_psock_getsockopt,
+	.ioctl		= f_psock_ioctl,
+	.poll		= f_psock_poll,
 	.socketpair 	= sock_no_socketpair,
 	.mmap		= sock_no_mmap
 
