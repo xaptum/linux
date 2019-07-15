@@ -447,11 +447,19 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
         // Now we need to wait for a reply
         if ( f_psock_proxy_wait_answer( msg, &answer ) > 0 )
         {       
-                printk( "f_psock_proxy: read_socket: Got a correct answer read :%d\n", answer->status );
-		memcpy( data, answer->data, answer->status );
-		result = answer->status;
-		kfree( answer->data );
-		kfree( answer );
+                if(answer && ((int)(answer->status)) > 0)
+                {
+                	printk( "f_psock_proxy: read_socket: Got a correct answer read :%d\n", 
+                		answer->status );
+			memcpy( data, answer->data, answer->status );
+			result = answer->status;
+			kfree( answer->data );
+			kfree( answer );
+                }
+                else
+                {
+                	printk(KERN_INFO "f_psock_proxy: read_socket: Could not read msg (but answer was given)");
+                }
         }
 
 	kfree( msg );
