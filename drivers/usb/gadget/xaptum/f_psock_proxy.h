@@ -12,13 +12,14 @@
 #include <linux/types.h>
 #include <linux/net.h>
 #include <net/sock.h>
-
 /**
  * Struct for holding proxy socket information
  */
 typedef struct f_psock_proxy_socket
 {
         int local_id; // The local socket id for the socket
+        int is_poll; // Whether the host is already blocking to communicate.
+        int can_write;
 } f_psock_proxy_socket_t;
 
 /******************************************************************************************
@@ -56,6 +57,16 @@ int f_psock_proxy_write_socket( f_psock_proxy_socket_t *psk, void *data, size_t 
  * Read from the socket
  */
 int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t size );
+
+/**
+ * Poll from the socket
+ */
+int f_psock_proxy_poll_start(int local_id, struct sock *sk);
+
+/**
+ * See if there is a message waiting to be read by a socket
+ */
+int f_psock_proxy_is_msg( int local_id );
 
 /************************************************************************************
  * API Fucntions towards the usb composite part of the driver

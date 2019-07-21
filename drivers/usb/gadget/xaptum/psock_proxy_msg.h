@@ -23,6 +23,7 @@ typedef enum psock_msg_type
 	F_PSOCK_MSG_ACTION_REQUEST, /**< Msg type for requesting an action to the other side */
 	F_PSOCK_MSG_ACTION_REPLY,   /**< Msg type for replying as a result of a requested action */
 	F_PSOCK_MSG_NONE,	    /**< Empty msg type (can be used to setup communication */
+	F_PSOCK_MSG_ASYNC,
 } psock_msg_type_t;
 
 /**
@@ -34,7 +35,8 @@ typedef enum psock_proxy_action
 	F_PSOCK_CONNECT,
 	F_PSOCK_READ,
 	F_PSOCK_WRITE,
-	F_PSOCK_CLOSE
+	F_PSOCK_CLOSE,
+	F_PSOCK_POLL
 } psock_proxy_action_t;
 
 /**
@@ -76,7 +78,7 @@ typedef struct psock_proxy_msg
 	uint32_t state;
 	void * data;			/**< Holder necessary to both, but they have no relation between systems */
 	struct psock_proxy_msg *related;/**< f_psock only */
-	struct list_head wait_list;	/**< f_psock only */
+	struct list_head list_handle;	/**< f_psock only */
 } psock_proxy_msg_t;
 
 void psock_proxy_msg_to_packet(psock_proxy_msg_t *msg, psock_proxy_msg_packet_t *packet);

@@ -303,7 +303,6 @@ static void psock_free_func( struct usb_function *f )
 
         usb_free_all_descriptors(f);
         kfree(func_to_psock(f));
-	
 }
 
 static int enable_endpoint( struct usb_composite_dev *cdev, struct f_psock *psock, struct usb_ep *ep )
