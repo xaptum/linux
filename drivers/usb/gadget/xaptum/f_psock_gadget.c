@@ -303,7 +303,6 @@ static void psock_free_func( struct usb_function *f )
 
         usb_free_all_descriptors(f);
         kfree(func_to_psock(f));
-	
 }
 
 static int enable_endpoint( struct usb_composite_dev *cdev, struct f_psock *psock, struct usb_ep *ep )
@@ -330,7 +329,6 @@ static void psock_send_complete( struct usb_ep *ep, struct usb_request *req )
 	}
 	printk( "psock_gadget: completed sending msg\n" );
 }
-
 
 static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
 {

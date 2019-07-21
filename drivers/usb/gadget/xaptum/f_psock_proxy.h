@@ -19,6 +19,7 @@
 typedef struct f_psock_proxy_socket
 {
         int local_id; // The local socket id for the socket
+        int is_poll; // Whether the host is already blocking to communicate.
 } f_psock_proxy_socket_t;
 
 /******************************************************************************************
@@ -56,6 +57,11 @@ int f_psock_proxy_write_socket( f_psock_proxy_socket_t *psk, void *data, size_t 
  * Read from the socket
  */
 int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t size );
+
+/**
+ * Poll from the socket
+ */
+int f_psock_proxy_poll_socket( f_psock_proxy_socket_t *psk);
 
 /************************************************************************************
  * API Fucntions towards the usb composite part of the driver

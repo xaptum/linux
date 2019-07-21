@@ -208,8 +208,9 @@ static int f_psock_ioctl(struct socket *sock, unsigned int cmd, unsigned long ar
 static unsigned int f_psock_poll(struct file *file, struct socket *sock,
 				      struct poll_table_struct *wait)
 {
-	printk( KERN_ERR "f_psock_poll: Function not implemented\n" );
-	return POLLOUT | POLLIN;
+	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
+
+	return f_psock_proxy_poll_socket(&psk->psk);
 }
 /**
  * Operation definitions for the psock type
@@ -365,5 +366,3 @@ int f_psock_cleanup_sockets(void)
 	sock_unregister( f_psock_family_ops.family );
 	return 0;
 }
-
-
