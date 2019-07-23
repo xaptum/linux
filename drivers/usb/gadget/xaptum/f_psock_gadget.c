@@ -329,6 +329,7 @@ static void psock_send_complete( struct usb_ep *ep, struct usb_request *req )
 	}
 }
 
+/* Recieves an incoming message from the host and passes it to the proxy */
 static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
 {
 
