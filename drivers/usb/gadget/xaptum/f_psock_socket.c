@@ -117,7 +117,6 @@ static int f_psock_sock_sendmsg( struct socket *sock,
 
 	data = kmalloc( len, GFP_KERNEL );
 
-	printk( KERN_INFO "psock_socket: sendmsg :%d %ld\n", psk->psk.local_id, len );
 	r = copy_from_iter( data, len,  &msg->msg_iter);
 	if ( r < len )
 	{
@@ -139,7 +138,7 @@ static int f_psock_sock_recvmsg(struct socket *sock,
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
 	char *buf = kmalloc( size, GFP_KERNEL );
 
-	printk( KERN_INFO "psock_socket: recvmsg %d\n", psk->psk.local_id );
+	printk( KERN_INFO "psock_socket: recvmsg len=%d on sock_id=%d\n", size, psk->psk.local_id );
 
 	res = f_psock_proxy_read_socket( &psk->psk, buf, size );
 	

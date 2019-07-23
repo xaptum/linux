@@ -327,7 +327,6 @@ static void psock_send_complete( struct usb_ep *ep, struct usb_request *req )
 	{
 		msg->state = MSG_SEND;
 	}
-	printk( "psock_gadget: completed sending msg\n" );
 }
 
 static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
@@ -338,8 +337,6 @@ static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
 	psock_proxy_msg_t *msg = kmalloc( sizeof( struct psock_proxy_msg ) , GFP_KERNEL );
 
 	psock_proxy_packet_to_msg(packet,msg);
-
-	printk( "Msg : %d %d %u\n", msg->type, msg->msg_id, msg->length );
 
 	if ( msg->length > req->length )
 	{
@@ -406,7 +403,6 @@ static int alloc_msg_read_request( struct usb_composite_dev *cdev, struct f_psoc
 {
 	struct usb_request *out_req;
 
-	printk( "Allocating msg request to read\n" );
 	out_req = usb_ep_alloc_request( psock->out_ep, GFP_ATOMIC );
 	out_req->length = sizeof( psock_proxy_msg_packet_t ) + PSOCK_GADGET_BUF_SIZE;
 	out_req->buf = kmalloc( out_req->length, GFP_ATOMIC );
@@ -460,7 +456,6 @@ static int enable_psock( struct usb_composite_dev *cdev, struct f_psock *psock )
 
 static void disable_psock(struct f_psock *psock )
 {
-	printk( "f_psock: disable_psock\n" );
 	if(psock)
 	{
 		usb_ep_disable(psock->in_ep);
@@ -500,7 +495,6 @@ static struct usb_function *psock_alloc(struct usb_function_instance *fi)
 	struct f_psock_opts *psock_opts;
 	struct f_psock *psock;
 
-	printk("Allocating psock function\n" );
 
 	psock = kzalloc( (sizeof *psock ), GFP_KERNEL );
 	if ( !psock )

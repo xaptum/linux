@@ -87,7 +87,7 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 	printk( KERN_INFO "f_psock_proxy: Got an incomming msg\n" );
 	if ( msg->type == F_PSOCK_MSG_ACTION_REPLY )
 	{
-		printk( KERN_INFO "f_psock_proxy: Got a reply\n" );
+		printk( KERN_INFO "f_psock_proxy: Got a reply on sock_id=%d\n", msg->sock_id );
 		struct psock_proxy_msg *orig = wait_list_get_msg_id( msg->msg_id );
 		if ( orig != NULL )
 		{
@@ -287,7 +287,7 @@ int f_psock_proxy_delete_socket( f_psock_proxy_socket_t *psk )
 
         psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
 
-	printk( "f_psock_proxy_delete_socket\n" );
+	printk( "f_psock_proxy_delete_socket sock_id=%d\n", psk->local_id );
        
        	msg->magic = PSOCK_MSG_MAGIC;	
 	msg->type = F_PSOCK_MSG_ACTION_REQUEST;
@@ -325,14 +325,13 @@ int f_psock_proxy_wait_answer( psock_proxy_msg_t *msg, psock_proxy_msg_t  **answ
 
 	if ( msg->state == MSG_ANSWERED )
 	{
-		printk( "Got an answer for socket msg\n" );
 		// Handle the result
 		*answermsg = msg->related;
 		res = 1;
 	}
 	else 
 	{
-		printk( KERN_ERR "psock_proxy: Got a timeout waiting for msg answer\n" );
+		printk( KERN_ERR "psock_proxy: Got a timeout waiting for msg answer on %d\n", msg->msg_id  );
 	}
 
 	// We can remove the item from the list now
@@ -456,12 +455,12 @@ int f_psock_proxy_poll_socket( f_psock_proxy_socket_t *psk)
 	int result = 0;
 	psock_proxy_msg_t * answer;
 
-	printk( "f_psock_proxy_poll_socket enter\n" );
+	printk( "f_psock_proxy_poll_socket enter for socket_id=%d\n",psk->local_id  );
 
 	/* If we are not currently polling then start */
 	if(!psk->is_poll)
 	{
-		printk( "f_psock_proxy_poll_socket starting poll\n" );
+		printk( "f_psock_proxy_poll_socket starting poll for socket_id=%d\n",psk->local_id );
 		psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
 		psk->is_poll = 1;
 	        msg->magic = PSOCK_MSG_MAGIC;	
