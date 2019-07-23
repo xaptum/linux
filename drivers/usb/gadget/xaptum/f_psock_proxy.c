@@ -45,7 +45,7 @@ static psock_proxy_msg_t *wait_list_get_msg_id( int id )
 	struct list_head *position = NULL;
 	list_for_each( position, &wait_list )
 	{
-		psock_proxy_msg_t *msg = list_entry( position, psock_proxy_msg_t, wait_list );
+		psock_proxy_msg_t *msg = list_entry( position, psock_proxy_msg_t, list_handle );
 		if ( msg->msg_id == id )
 		{
 			return msg;
@@ -62,7 +62,7 @@ static psock_proxy_msg_t *async_list_get_socket_msg( int id )
 	struct list_head *position = NULL;
 	list_for_each( position, &async_list )
 	{
-		psock_proxy_msg_t *msg = list_entry( position, psock_proxy_msg_t, wait_list );
+		psock_proxy_msg_t *msg = list_entry( position, psock_proxy_msg_t, list_handle );
 		if ( msg->sock_id == id )
 		{
 			return msg;
@@ -103,8 +103,8 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 	else if( msg->type == F_PSOCK_MSG_ASYNC )
 	{
 		// Add the msg to the list of waiting for an answer msgs
-		INIT_LIST_HEAD( &msg->wait_list );
-		list_add( &msg->wait_list, &async_list );
+		INIT_LIST_HEAD( &msg->list_handle );
+		list_add( &msg->list_handle, &async_list );
 	}
 
 }
@@ -318,8 +318,8 @@ int f_psock_proxy_wait_answer( psock_proxy_msg_t *msg, psock_proxy_msg_t  **answ
 	printk( "Waiting for answer to socket msg %d\n", msg->msg_id );
 
 	// Add the msg to the list of waiting for an answer msgs
-	INIT_LIST_HEAD( &msg->wait_list );
-	list_add( &msg->wait_list, &wait_list );	
+	INIT_LIST_HEAD( &msg->list_handle );
+	list_add( &msg->list_handle, &wait_list );	
 
 	wait_event_timeout( f_psock_proxy_wait_queue, ( msg->state == MSG_ANSWERED ), timeoutMS );
 
@@ -335,7 +335,7 @@ int f_psock_proxy_wait_answer( psock_proxy_msg_t *msg, psock_proxy_msg_t  **answ
 	}
 
 	// We can remove the item from the list now
-	list_del( &msg->wait_list );
+	list_del( &msg->list_handle );
 
 	return res;
 }
@@ -349,8 +349,8 @@ int f_psock_proxy_wait_send( psock_proxy_msg_t *msg )
 	printk( "psock_proxy : Waiting for send socket msg %d\n", msg->msg_id );
 
 	// Add the msg to the list of waiting for an answer msgs
-	INIT_LIST_HEAD( &msg->wait_list );
-	list_add( &msg->wait_list, &wait_list );	
+	INIT_LIST_HEAD( &msg->list_handle );
+	list_add( &msg->list_handle, &wait_list );	
 
 	wait_event_timeout( f_psock_proxy_wait_queue, ( msg->state == MSG_SEND ), F_PSOCK_MSG_TIMEOUT );
 	if ( msg->state == MSG_SEND )
@@ -363,7 +363,7 @@ int f_psock_proxy_wait_send( psock_proxy_msg_t *msg )
 	}
 
 	// We can remove the item from the list now
-	list_del( &msg->wait_list );
+	list_del( &msg->list_handle );
 
 	return res;
 
@@ -517,7 +517,7 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 	{
 		printk( "f_psock_proxy_read_socket cached data sock_id=%d len=%u\n", psk->local_id, len );
 		//Remove the message from the async list
-		list_del(&msg->wait_list);
+		list_del(&msg->list_handle);
 		psk->is_poll = 0;
 		result = min(msg->status,len);
 		memcpy(data,msg->data,result);

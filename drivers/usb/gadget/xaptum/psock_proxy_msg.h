@@ -78,7 +78,7 @@ typedef struct psock_proxy_msg
 	uint32_t state;
 	void * data;			/**< Holder necessary to both, but they have no relation between systems */
 	struct psock_proxy_msg *related;/**< f_psock only */
-	struct list_head wait_list;	/**< f_psock only */
+	struct list_head list_handle;	/**< f_psock only */
 } psock_proxy_msg_t;
 
 void psock_proxy_msg_to_packet(psock_proxy_msg_t *msg, psock_proxy_msg_packet_t *packet);
