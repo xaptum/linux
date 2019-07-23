@@ -43,8 +43,6 @@ static int f_psock_sock_shutdown(struct socket *sock, int how )
 	struct sock *sk = sock->sk;
         struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sk;
 
-	printk( KERN_INFO "f_psock_socket : socket shutdown :%d\n", psk->psk.local_id );
-
         f_psock_proxy_delete_socket( &psk->psk );
 	
 	if (!sk)
@@ -71,7 +69,6 @@ static int f_psock_sock_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	int err;
-	printk( KERN_INFO "f_psock_socket : releasing socket\n" );
 
 	if ( !sk ) 
 	{
@@ -95,8 +92,6 @@ static int f_psock_sock_connect(struct socket *sock, struct sockaddr *addr, int 
 	int res = -1;
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
 
-	printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->psk.local_id );
-
 	res = f_psock_proxy_connect_socket( &psk->psk, addr, alen );
 
 	return res;
@@ -117,7 +112,6 @@ static int f_psock_sock_sendmsg( struct socket *sock,
 
 	data = kmalloc( len, GFP_KERNEL );
 
-	printk( KERN_INFO "psock_socket: sendmsg :%d %ld\n", psk->psk.local_id, len );
 	r = copy_from_iter( data, len,  &msg->msg_iter);
 	if ( r < len )
 	{
@@ -138,8 +132,6 @@ static int f_psock_sock_recvmsg(struct socket *sock,
 	int res, r;
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
 	char *buf = kmalloc( size, GFP_KERNEL );
-
-	printk( KERN_INFO "psock_socket: recvmsg %d\n", psk->psk.local_id );
 
 	res = f_psock_proxy_read_socket( &psk->psk, buf, size );
 	
@@ -262,7 +254,6 @@ static struct sock *f_psock_sock_alloc(struct net *net, struct socket *sock, int
 {
 	struct sock *sk;
 
-	printk( KERN_INFO "psock_socket: Allocating sk socket\n" );
 	sk = sk_alloc(net, PF_PSOCK, prio, &f_psock_proto , kern);
 
 	if ( !sk )
@@ -304,8 +295,6 @@ static int f_psock_sock_create( struct net *net, struct socket *sock, int protoc
 {
 
 	struct sock *sk;
-
-	printk( KERN_INFO "psock_proxy: Creating socket\n" );
 	
 	sock->state = SS_UNCONNECTED;
 	sock->ops = &f_psock_ops;

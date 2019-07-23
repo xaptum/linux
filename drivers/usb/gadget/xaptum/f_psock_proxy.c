@@ -63,7 +63,6 @@ static struct delayed_work f_psock_work;
 
 void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 {
-	printk( KERN_INFO "f_psock_proxy: Got an incomming msg\n" );
 	if ( msg->type == F_PSOCK_MSG_ACTION_REPLY )
 	{
 		struct psock_proxy_msg *orig = wait_list_get_msg_id( msg->msg_id );
@@ -242,8 +241,6 @@ int f_psock_proxy_create_socket( f_psock_proxy_socket_t *psk )
 
 	f_psock_proxy_wait_send( msg );
 
-	printk( KERN_INFO "psock_proxy: Created socket with id : %d\n" , msg->sock_id);
-
 	// Free the msg
 	kfree( msg );
 
@@ -257,8 +254,6 @@ int f_psock_proxy_delete_socket( f_psock_proxy_socket_t *psk )
 {
 
         psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
-
-	printk( "f_psock_proxy_delete_socket\n" );
        
        	msg->magic = PSOCK_MSG_MAGIC;	
 	msg->type = F_PSOCK_MSG_ACTION_REQUEST;
@@ -296,14 +291,13 @@ int f_psock_proxy_wait_answer( psock_proxy_msg_t *msg, psock_proxy_msg_t  **answ
 
 	if ( msg->state == MSG_ANSWERED )
 	{
-		printk( "Got an answer for socket msg\n" );
 		// Handle the result
 		*answermsg = msg->related;
 		res = 1;
 	}
 	else 
 	{
-		printk( KERN_ERR "psock_proxy: Got a timeout waiting for msg answer\n" );
+		printk( KERN_ERR "psock_proxy: Got a timeout waiting for msg answer on %d\n", msg->msg_id  );
 	}
 
 	// We can remove the item from the list now
@@ -318,7 +312,6 @@ int f_psock_proxy_wait_answer( psock_proxy_msg_t *msg, psock_proxy_msg_t  **answ
 int f_psock_proxy_wait_send( psock_proxy_msg_t *msg )
 {
 	int res = F_PSOCK_FAIL;
-	printk( "psock_proxy : Waiting for send socket msg %d\n", msg->msg_id );
 
 	// Add the msg to the list of waiting for an answer msgs
 	INIT_LIST_HEAD( &msg->wait_list );
@@ -349,8 +342,6 @@ int f_psock_proxy_connect_socket( f_psock_proxy_socket_t *psk, struct sockaddr *
 	int result = F_PSOCK_FAIL;
 	psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
 	psock_proxy_msg_t * answer;
-
-	printk( "f_psock_proxy_connect_socket\n" );
        
         msg->magic = PSOCK_MSG_MAGIC;	
 	msg->type = F_PSOCK_MSG_ACTION_REQUEST;
@@ -370,7 +361,6 @@ int f_psock_proxy_connect_socket( f_psock_proxy_socket_t *psk, struct sockaddr *
 	// Now we need to wait for a reply
 	if ( f_psock_proxy_wait_answer( msg, &answer ) > 0 )
 	{
-		printk( "Got a correct answer\n" );
 		result =  answer->status;
 		kfree ( answer );
 	};
@@ -391,8 +381,6 @@ int f_psock_proxy_write_socket( f_psock_proxy_socket_t *psk, void *data, size_t 
 	int result = F_PSOCK_FAIL;
 	psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
  	psock_proxy_msg_t * answer;
-
-	printk( "f_psock_proxy_write_socket %d %ld\n", psk->local_id, len );
 
 	msg->magic = PSOCK_MSG_MAGIC;
         msg->type = F_PSOCK_MSG_ACTION_REQUEST;
@@ -429,8 +417,6 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 	psock_proxy_msg_t * msg = kzalloc( sizeof( psock_proxy_msg_t ) , GFP_KERNEL);
  	psock_proxy_msg_t * answer;
 
-	printk( "f_psock_proxy_read_socket %d %ld\n", psk->local_id, len );
-
 	msg->magic = PSOCK_MSG_MAGIC;
         msg->type = F_PSOCK_MSG_ACTION_REQUEST;
         msg->action = F_PSOCK_READ,
@@ -449,8 +435,6 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
         {       
                 if(answer && ((int)(answer->status)) > 0)
                 {
-                	printk( "f_psock_proxy: read_socket: Got a correct answer read :%d\n", 
-                		answer->status );
 			memcpy( data, answer->data, answer->status );
 			result = answer->status;
 			kfree( answer->data );
