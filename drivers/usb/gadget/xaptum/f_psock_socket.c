@@ -7,23 +7,20 @@
  */
 
 #include "f_psock_proxy.h"
+#include "f_psock_socket.h"
 
+#include <linux/hashtable.h>
 #include <linux/net.h>
-#include <net/sock.h>
 #include <linux/poll.h>
+#include <linux/eventpoll.h>
+#include <net/sock.h>
 
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
 #define PSOCK_MAX_TRANSMIT_BYTES 128
 
-/**
- * psock local socket data
- */
-struct f_psock_pinfo
-{
-	struct sock		sk; 	 /**< @note Needs to be here as first entry !! */
-	struct f_psock_proxy_socket psk; /**< our local socket information */
-};
+static void f_psock_def_write_space(struct sock *sk);
+static void f_psock_def_readable(struct sock *sk);
 
 /**
  * kill the socket
@@ -99,6 +96,12 @@ static int f_psock_sock_connect(struct socket *sock, struct sockaddr *addr, int 
 
 	res = f_psock_proxy_connect_socket( &psk->psk, addr, alen );
 
+	/* Let poll know that we can write now */
+	psk->sk.sk_write_space = f_psock_def_write_space;
+	psk->sk.sk_data_ready =f_psock_def_readable;
+	psk->psk.can_write=1;
+	psk->sk.sk_write_space(&psk->sk);
+
 	return res;
 }
 
@@ -112,6 +115,7 @@ static int f_psock_sock_sendmsg( struct socket *sock,
 	void *data;
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
 
+	printk( KERN_INFO "psock_socket: f_psock_sock_sendmsg enter\n" );
 	if(len>PSOCK_MAX_TRANSMIT_BYTES)
 		len=PSOCK_MAX_TRANSMIT_BYTES;
 
@@ -122,8 +126,12 @@ static int f_psock_sock_sendmsg( struct socket *sock,
 	{
 		printk( KERN_INFO "psock_socket: sendmsg itercpy incomplete\n" );
 	}
+	printk( KERN_INFO "psock_socket: f_psock_sock_sendmsg Writing\n" );
 
+	/* TODO: Deal with concurreny and this variable */
 	res = f_psock_proxy_write_socket( &psk->psk, data , len );
+
+	printk( KERN_INFO "psock_socket: f_psock_sock_sendmsg return\n" );
 
 	return res;
 }
@@ -204,13 +212,70 @@ static int f_psock_ioctl(struct socket *sock, unsigned int cmd, unsigned long ar
 	printk( KERN_ERR "f_psock_ioctl: Function not implemented\n" );
 	return -1;
 }
-static unsigned int f_psock_poll(struct file *file, struct socket *sock,
-				      struct poll_table_struct *wait)
+
+static unsigned int f_psock_poll(struct file *file, struct socket *sock, poll_table *wait)
 {
+	unsigned int pmask = 0;
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
 
-	return f_psock_proxy_poll_socket(&psk->psk);
+	sock_poll_wait(file, sk_sleep(sock->sk), wait);
+
+	/* Switch to polling mode if we are not currently polling. */
+	if(!psk->psk.is_poll)
+	{
+		f_psock_proxy_poll_start(psk->psk.local_id,&psk->sk);
+		psk->psk.is_poll = 1;
+	}
+
+	/* Determine OUT flags */
+	if(psk->psk.can_write)
+	{
+		printk(KERN_INFO "f_psock_poll: POLLOUT | POLLWRNORM | POLLWRBAND for socket_id=%d",psk->psk.local_id);
+		
+		pmask |= POLLOUT | POLLWRNORM | POLLWRBAND;
+	}
+	else
+	{
+		printk(KERN_INFO "f_psock_poll: No OUT for socket_id=%d",psk->psk.local_id);
+	}
+
+
+	/* Determine IN flags */
+	if( f_psock_proxy_is_msg(psk->psk.local_id) )
+	{
+		pmask |= POLLIN | POLLRDNORM | POLLRDHUP;
+	}
+	else
+	{
+		printk(KERN_INFO "f_psock_poll: No IN for socket_id=%d",psk->psk.local_id);
+	}
+
+	return pmask;
 }
+
+static void f_psock_def_write_space(struct sock *sk)
+{
+	struct socket_wq *wq;
+	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sk;
+	printk("f_psock_def_write_space enter socket_id=%d\n",psk->psk.local_id);
+	wq = rcu_dereference(sk->sk_wq);
+	wake_up_interruptible_all(&wq->wait);
+	sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
+	printk("f_psock_def_write_space exit socket_id=%d\n",psk->psk.local_id);
+}
+
+static void f_psock_def_readable(struct sock *sk)
+{
+	struct socket_wq *wq;
+	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sk;
+	printk("f_psock_def_readable enter socket_id=%d\n",psk->psk.local_id);
+	wq = rcu_dereference(sk->sk_wq);
+	wake_up_interruptible_sync_poll(&wq->wait, POLLIN | POLLPRI |
+		POLLRDNORM | POLLRDBAND);
+	sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
+	printk("f_psock_def_readable exit socket_id=%d\n",psk->psk.local_id);
+}
+
 /**
  * Operation definitions for the psock type
  */
@@ -294,7 +359,7 @@ static void f_psock_sock_init(struct sock *sk, struct sock *parent)
 {
 	
 	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sk;
-	f_psock_proxy_create_socket( &psk->psk );	
+	f_psock_proxy_create_socket( &psk->psk );
 }
 
 /**
@@ -352,6 +417,7 @@ int f_psock_init_sockets(void )
 		printk( KERN_INFO "Error registering socket\n" );
 		return err;
 	}
+
 
 	return err;
 }
