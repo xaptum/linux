@@ -535,7 +535,6 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 	{
 		//Remove the message from the async list
 		list_del(&msg->list_handle);
-		psk->is_poll = 0;
 		result = min(msg->status,len);
 		memcpy(data,msg->data,result);
 	}
