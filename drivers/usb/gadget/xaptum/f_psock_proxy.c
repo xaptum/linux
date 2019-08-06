@@ -582,7 +582,6 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 		printk( "f_psock_proxy_read_socket cached data sock_id=%d len=%u\n", psk->local_id, len );
 		//Remove the message from the async list
 		list_del(&msg->list_handle);
-		psk->is_poll = 0;
 		result = min(msg->status,len);
 		memcpy(data,msg->data,result);
 	}
