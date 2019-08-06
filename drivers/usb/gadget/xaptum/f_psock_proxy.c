@@ -61,6 +61,19 @@ static psock_proxy_msg_t *wait_list_get_msg_id( int id )
 	return NULL;
 }
 
+static psock_proxy_msg_t *wait_list_get_blocking_read_for_sock( int sock_id )
+{
+	struct list_head *position = NULL;
+	list_for_each( position, &wait_list )
+	{
+		psock_proxy_msg_t *msg = list_entry( position, psock_proxy_msg_t, list_handle );
+		if ( msg->sock_id == sock_id && msg->action == F_PSOCK_READ )
+		{
+			return msg;
+		}
+	}
+	return NULL;
+}
 /**
  * Function to find a msg on the async list
  */
@@ -91,14 +104,43 @@ static struct delayed_work f_psock_work;
 
 void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 {
-	struct psock_proxy_msg *orig;
 	struct sock *sk;
+	struct psock_proxy_msg *orig = NULL;
+
 
 	printk( KERN_INFO "f_psock_proxy: Got an incomming msg\n" );
+
+	/* If the message is from async from a polling socket */
+	if( msg->type == F_PSOCK_MSG_ASYNC )
+	{
+		printk( KERN_INFO "f_psock_proxy: Got an ASYNC msg on sock_id=%d\n", msg->sock_id );
+
+		/* If there is a socket blocking during a poll we can convert the message to a reply */
+		if(orig = wait_list_get_blocking_read_for_sock(msg->sock_id))
+		{
+			msg->type = F_PSOCK_MSG_ACTION_REPLY;
+			msg->action = F_PSOCK_WRITE;
+			msg->msg_id = orig->msg_id;
+		}
+		else
+		{
+			/* Add the msg to the list of waiting for an answer msgs */
+			INIT_LIST_HEAD( &msg->list_handle );
+			list_add( &msg->list_handle, &async_list );
+
+			/* Wake up the socket */
+			sk = f_psock_lookup[msg->sock_id % PSOCK_LOOKUP_SIZE];
+			if(sk)
+				sk->sk_data_ready(sk);
+		}
+	}
+
 	if ( msg->type == F_PSOCK_MSG_ACTION_REPLY )
 	{
 		printk( KERN_INFO "f_psock_proxy: Got a reply on sock_id=%d\n", msg->sock_id );
-		orig = wait_list_get_msg_id( msg->msg_id );
+
+		/* Look up the original message if we do not already have it */
+		orig = orig ? orig : wait_list_get_msg_id( msg->msg_id );
 		if ( orig != NULL )
 		{
 			orig->related = msg;
@@ -108,18 +150,6 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 		{
 			printk( "f_psock_proxy: Could not find original msg_id :%d\n", msg->msg_id);
 		}
-	}
-	/* If we have received a message that was not asked for */
-	else if( msg->type == F_PSOCK_MSG_ASYNC )
-	{
-		/* Add the msg to the list of waiting for an answer msgs */
-		INIT_LIST_HEAD( &msg->list_handle );
-		list_add( &msg->list_handle, &async_list );
-
-		/* Wake up the socket */
-		sk = f_psock_lookup[msg->sock_id % PSOCK_LOOKUP_SIZE];
-		if(sk)
-			sk->sk_data_ready(sk);
 	}
 
 }
