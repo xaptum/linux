@@ -533,10 +533,21 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 	/* If we are polling try to find a async message */
 	if(psk->is_poll && (msg = async_list_get_socket_msg(psk->local_id)))
 	{
-		//Remove the message from the async list
-		list_del(&msg->list_handle);
-		result = min(msg->status,len);
-		memcpy(data,msg->data,result);
+		int payload_size = msg->status;
+		int unread_size =  payload_size - msg->bytes_read;
+
+
+		//Copy the memory to the data buffer
+		result = min(unread_size,len);
+		memcpy(data, (uint8_t*)msg->data+msg->bytes_read, result);
+
+		/* If we read the entire packet delete it */
+		if( (msg->bytes_read += result) == payload_size)
+		{
+			list_del(&msg->list_handle);
+			kfree( msg->data );
+			kfree( msg );
+		}
 	}
 	/* If we are not polling make a regular blocking call */
 	else if(!psk->is_poll)
