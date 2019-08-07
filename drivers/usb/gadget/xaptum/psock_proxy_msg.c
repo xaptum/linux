@@ -26,4 +26,5 @@ void psock_proxy_packet_to_msg(psock_proxy_msg_packet_t *packet, psock_proxy_msg
     msg->data = NULL;
     msg->related = NULL;
     msg->list_handle = (const struct list_head){0};
+    msg->bytes_read = 0;
 }
