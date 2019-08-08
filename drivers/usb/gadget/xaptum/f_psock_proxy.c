@@ -126,7 +126,7 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 		{
 			/* Add the msg to the list of waiting for an answer msgs */
 			INIT_LIST_HEAD( &msg->list_handle );
-			list_add( &msg->list_handle, &async_list );
+			list_add_tail( &msg->list_handle, &async_list );
 
 			/* Wake up the socket */
 			sk = f_psock_lookup[msg->sock_id % PSOCK_LOOKUP_SIZE];
