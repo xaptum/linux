@@ -16,6 +16,8 @@
 #define PSOCK_GADGET_MAX_SEND 5
 #define PSOCK_GADGET_BUF_SIZE 512
 
+extern void f_psock_proxy_sched_process_in_msg(void);
+
 /**************************************************************************
  *  f_psock structure definitions
  **************************************************************************/
@@ -58,8 +60,8 @@ static int alloc_msg_read_request( struct usb_composite_dev *cdev, struct f_psoc
 /**************************************************************************
  * Workqueue and related
  **************************************************************************/
-static struct workqueue_struct *f_psock_gadget_work_queue;
-static struct delayed_work f_psock_gadget_work;
+static struct workqueue_struct *f_psock_gadget_work_queue = NULL;
+static struct delayed_work f_psock_gadget_work = {0};
 
 // @todo check for better way to keep this info as this makes it impossible to use more then one instnace
 static struct usb_composite_dev *w_cdev;
@@ -67,20 +69,13 @@ static struct f_psock *w_psock;
 
 void f_psock_gadget_work_handler( struct work_struct *work )
 {
-	int count = 0;
 	psock_proxy_msg_t * msg = NULL;
-	
+
 	// Check if we have new outgoing msg to send
-	while ( ( f_psock_proxy_pop_out_msg( (void **)&msg ) == 1 )
-	     && ( count < PSOCK_GADGET_MAX_SEND ) )
+	while ( ( f_psock_proxy_pop_out_msg( (void **)&msg ) == 1 ) )
 	{
-		alloc_msg_send_request( w_cdev, w_psock, msg );	
-		count++;	
-	}	
-
-
-	// Requeue the task
-	queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, PSOCK_PROXY_JIFFIES );
+		alloc_msg_send_request( w_cdev, w_psock, msg );
+	}
 }
 
 
@@ -293,8 +288,6 @@ static void psock_free_func( struct usb_function *f )
 {
 	struct f_psock_opts *opts;
 
-	printk( "f_psock: psock_free_func\n" );
-
         opts = container_of(f->fi, struct f_psock_opts, func_inst);
 
         mutex_lock(&opts->lock);
@@ -323,9 +316,11 @@ static int enable_endpoint( struct usb_composite_dev *cdev, struct f_psock *psoc
 static void psock_send_complete( struct usb_ep *ep, struct usb_request *req )
 {
 	struct psock_proxy_msg *msg = req->context;
+
 	if ( msg != NULL )
 	{
 		msg->state = MSG_SEND;
+		f_psock_proxy_sched_process_in_msg();
 	}
 }
 
@@ -356,6 +351,9 @@ static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
 
 	// Done creating in msg, lets move in to the proxy
 	f_psock_proxy_push_in_msg( msg );
+
+	//Schedule a work task to process the message
+	f_psock_proxy_sched_process_in_msg();
 
 	// Prepare for next read
 	alloc_msg_read_request(w_cdev, w_psock);
@@ -424,6 +422,7 @@ static int alloc_requests( struct usb_composite_dev *cdev, struct f_psock *psock
 	int result = 0;
 
 	struct psock_proxy_msg msg = {0};
+
 	msg.type = F_PSOCK_MSG_NONE;
 	msg.length = sizeof(struct psock_proxy_msg );
 	
@@ -449,8 +448,6 @@ static int enable_psock( struct usb_composite_dev *cdev, struct f_psock *psock )
 	// @todo check for better way to pass these structs
 	w_cdev = cdev;
 	w_psock = psock;
-	
-	queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, PSOCK_PROXY_JIFFIES );
 
 	return result;
 }
@@ -682,23 +679,28 @@ static struct usb_function_instance *psock_alloc_inst(void)
 DECLARE_USB_FUNCTION(psock, psock_alloc_inst, psock_alloc);
 
 int f_psock_init_gadget( void )
-{ 
-	printk( "Registering f_psock usb function\n" );
+{
 	usb_function_register( &psockusb_func );
 
-	// Work
-	f_psock_gadget_work_queue = create_workqueue( "f_psock_gadget_work_queue" );
+	// Initialize the work struct
 	INIT_DELAYED_WORK( &f_psock_gadget_work, f_psock_gadget_work_handler );
+	f_psock_gadget_work_queue = create_workqueue( "f_psock_gadget_work_queue" );
 
+	// Messages may have been queued before this point
+	f_psock_gadget_sched_process_out_msg();
 	return 0;
 }
 
 
 int f_psock_cleanup_gadget( void )
 {
-	printk( "Unregistering f_psock usb function\n" );
 	usb_function_unregister( &psockusb_func);
 	return 0;
 }
 
 
+void f_psock_gadget_sched_process_out_msg(void)
+{
+	if(f_psock_gadget_work_queue)
+		queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, 0 );
+}

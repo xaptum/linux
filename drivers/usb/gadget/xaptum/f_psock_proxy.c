@@ -13,11 +13,15 @@
 #include <linux/net.h>
 #include <linux/kernel.h>
 #include <linux/poll.h>
+#include <linux/spinlock.h>
 #include <net/sock.h>
 
 #define F_PSOCK_PROXY_JIFFIES 50
 #define F_PSOCK_MSG_TIMEOUT 10000
-#define F_PSOCK_MAX_MSG_WORK	5 
+#define F_PSOCK_MAX_MSG_WORK	5
+
+#define XARPCD_SUCCESS 1
+#define XARPCD_FAIL 0
 
 // Note this should be a multiple of 2!!
 // Is the amount of msg the buffer can hold
@@ -39,6 +43,9 @@ LIST_HEAD( wait_list );
 //List of received messages waiting to be read
 LIST_HEAD( async_list );
 
+//Spin locks to prevent concurrent in/out queue ops
+spinlock_t f_psock_out_queue_sl;
+spinlock_t f_psock_in_queue_sl;
 
 /* A lookup table for sockets being polled */
 struct sock **f_psock_lookup;
@@ -111,6 +118,7 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 		orig = wait_list_get_msg_id( msg->msg_id );
 		if ( orig != NULL )
 		{
+			printk(KERN_INFO "Got reply on sock_id=%d",msg->sock_id);
 			orig->related = msg;
 			orig->state = MSG_ANSWERED;
 		}
@@ -126,20 +134,14 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 void f_psock_work_handler( struct work_struct *work )
 {
 	struct psock_proxy_msg *msg;
-	int count = 0;
 	// Handle pending incoming msg's 
-	while( (f_psock_proxy_pop_in_msg( (void **)&msg  ) == F_PSOCK_SUCCESS ) 
-	       && ( count < F_PSOCK_MAX_MSG_WORK ) )
+	while( (f_psock_proxy_pop_in_msg( (void **)&msg  ) == F_PSOCK_SUCCESS ) )
 	{
 		f_psock_proxy_handle_in_msg( msg );
-		count++;
 	}
 	
 	// Wake up the msgs that got an answer
 	wake_up( &f_psock_proxy_wait_queue );
-
-	// Requeue the task
-	queue_delayed_work( f_psock_proxy_work_queue, &f_psock_work, F_PSOCK_PROXY_JIFFIES );
 }
 
 /**
@@ -224,10 +226,12 @@ int f_psock_proxy_init( void )
 	f_psock_proxy_create_in_buffer();
 	f_psock_proxy_create_out_buffer();
 
+	spin_lock_init(&f_psock_out_queue_sl);
+	spin_lock_init(&f_psock_in_queue_sl);
+
 	// Work and workqueue initialization
 	f_psock_proxy_work_queue = create_workqueue( "f_psock_proxy_work_queue" );
 	INIT_DELAYED_WORK( &f_psock_work, f_psock_work_handler );
-	queue_delayed_work( f_psock_proxy_work_queue, &f_psock_work, F_PSOCK_PROXY_JIFFIES );
 
 
 	f_psock_lookup = kzalloc(sizeof(struct sock *) * PSOCK_LOOKUP_SIZE, GFP_KERNEL);
@@ -287,6 +291,7 @@ int f_psock_proxy_create_socket( f_psock_proxy_socket_t *psk )
 	psk->can_write = 0;
 
 	f_psock_proxy_push_out_msg( msg );
+	f_psock_gadget_sched_process_out_msg();
 
 	f_psock_proxy_wait_send( msg );
 
@@ -318,6 +323,7 @@ int f_psock_proxy_delete_socket( f_psock_proxy_socket_t *psk )
 	msg->related = NULL;
 
         f_psock_proxy_push_out_msg( msg );
+	f_psock_gadget_sched_process_out_msg();
 	
 	f_psock_proxy_wait_send( msg );
 
@@ -407,10 +413,12 @@ int f_psock_proxy_connect_socket( f_psock_proxy_socket_t *psk, struct sockaddr *
 
 	// Lets push the msg on the out queus
         f_psock_proxy_push_out_msg( msg );
+        f_psock_gadget_sched_process_out_msg();
 
 	// Now we need to wait for a reply
 	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
 	{
+        	printk(KERN_INFO "f_psock_proxy_connect_socket Got a reply");
 		result =  answer->status;
 		kfree ( answer );
 	};
@@ -449,6 +457,8 @@ int f_psock_proxy_write_socket( f_psock_proxy_socket_t *fpsk, void *data, size_t
 	fpsk->can_write = 0;
 
         f_psock_proxy_push_out_msg( msg );
+
+        f_psock_gadget_sched_process_out_msg();
 
         // Now we need to wait for a reply
         if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
@@ -490,6 +500,8 @@ int f_psock_proxy_poll_start(int local_id, struct sock *sk)
 
 	// Lets push the msg on the out queus
 	f_psock_proxy_push_out_msg( msg );
+
+        f_psock_gadget_sched_process_out_msg();
 
 	// Now we need to wait for a reply
 	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
@@ -566,6 +578,8 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 
 		f_psock_proxy_push_out_msg( msg );
 
+        	f_psock_gadget_sched_process_out_msg();
+
 		// Now we need to wait for a reply
 		if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
 		{
@@ -593,8 +607,15 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 static int f_psock_proxy_push_out_msg( void *msg )
 {
 	struct psock_buf_item *item;
-	unsigned long head = out_buffer->head;
-	unsigned long tail = out_buffer->tail;
+	unsigned long head;
+	unsigned long tail;
+	int ret;
+
+	ret = XARPCD_FAIL;
+
+	spin_lock(&f_psock_out_queue_sl);
+	head = out_buffer->head;
+	tail = out_buffer->tail;
 
  	if ( CIRC_SPACE( head, tail, F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item )) >= sizeof(struct psock_buf_item ) )
 	{
@@ -604,10 +625,11 @@ static int f_psock_proxy_push_out_msg( void *msg )
 		// Update head
 		out_buffer->head = (head + sizeof( struct psock_buf_item )) & ( F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item )  - 1 );
 
-		return F_PSOCK_SUCCESS;
+		ret = F_PSOCK_SUCCESS;
 	}
+	spin_unlock(&f_psock_out_queue_sl);
 
-	return F_PSOCK_FAIL;
+	return ret;
 
 }
 
@@ -616,10 +638,15 @@ static int f_psock_proxy_push_out_msg( void *msg )
  */
 int f_psock_proxy_pop_in_msg( void ** msg )
 {
-
 	struct psock_buf_item *item;
-	unsigned long head = in_buffer->head;
-	unsigned long tail = in_buffer->tail;
+	unsigned long head;
+	unsigned long tail;
+	int ret = XARPCD_FAIL;
+
+	spin_lock(&f_psock_in_queue_sl);
+
+	head = in_buffer->head;
+	tail = in_buffer->tail;
 	
 	if ( CIRC_CNT( head, tail, F_PSOCK_BUFF_SIZE*sizeof(struct psock_buf_item )) >= sizeof(struct psock_buf_item ) )
 	{
@@ -629,11 +656,12 @@ int f_psock_proxy_pop_in_msg( void ** msg )
 
 		in_buffer->tail = (tail + sizeof( struct psock_buf_item )) & ( F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item ) - 1 ); 
 	
-		return F_PSOCK_SUCCESS;
+		ret = F_PSOCK_SUCCESS;
 	}
 
-	return F_PSOCK_FAIL;
+	spin_unlock(&f_psock_in_queue_sl);
 
+	return ret;
 }
 
 
@@ -646,10 +674,16 @@ int f_psock_proxy_pop_in_msg( void ** msg )
  */
 int f_psock_proxy_pop_out_msg( void ** msg )
 {
-
 	struct psock_buf_item *item;
-	unsigned long head = out_buffer->head;
-	unsigned long tail = out_buffer->tail;
+	unsigned long head;
+	unsigned long tail;
+	int ret;
+
+	ret = XARPCD_FAIL;
+
+	spin_lock(&f_psock_out_queue_sl);
+	head = out_buffer->head;
+	tail = out_buffer->tail;
 
 	 if ( CIRC_CNT( head, tail, F_PSOCK_BUFF_SIZE*sizeof(struct psock_buf_item )) >= sizeof(struct psock_buf_item ) )
 	{
@@ -660,11 +694,12 @@ int f_psock_proxy_pop_out_msg( void ** msg )
 		out_buffer->tail = (tail + sizeof( struct psock_buf_item )) & ( F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item ) - 1 );
 
 
-		return F_PSOCK_SUCCESS;
+		ret = F_PSOCK_SUCCESS;
 	}
 
+	spin_unlock(&f_psock_out_queue_sl);
 
-	return F_PSOCK_FAIL;
+	return ret;
 }
 
 /**
@@ -672,11 +707,16 @@ int f_psock_proxy_pop_out_msg( void ** msg )
  */
 int f_psock_proxy_push_in_msg( void * msg)
 {
-
 	struct psock_buf_item *item;
 
-	unsigned long head = in_buffer->head;
-	unsigned long tail = in_buffer->tail; 
+	unsigned long head;
+	unsigned long tail;
+	int ret = XARPCD_FAIL;
+
+	spin_lock(&f_psock_in_queue_sl);
+
+	head = in_buffer->head;
+	tail = in_buffer->tail;
 
 	if ( CIRC_SPACE( head, tail, F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item )) >= sizeof(struct psock_buf_item ) ) 
 	{
@@ -690,7 +730,13 @@ int f_psock_proxy_push_in_msg( void * msg)
 		return F_PSOCK_SUCCESS;
 	}
 
+	spin_unlock(&f_psock_in_queue_sl);
 
-	return F_PSOCK_FAIL;
+	return ret;
+}
 
+/* Schedules the in message workqueue function to run. */ 
+void f_psock_proxy_sched_process_in_msg(void)
+{
+	queue_delayed_work( f_psock_proxy_work_queue, &f_psock_work, 0 );
 }

@@ -83,4 +83,6 @@ int f_psock_proxy_pop_out_msg( void ** msg );
  */
 int f_psock_proxy_push_in_msg( void *msg );
 
+void f_psock_gadget_sched_process_out_msg(void);
+
 #endif
