@@ -43,7 +43,10 @@ LIST_HEAD( wait_list );
 //List of received messages waiting to be read
 LIST_HEAD( async_list );
 
-//Spin locks to prevent concurrent in/out queue ops
+/* Define mutexes to protect the message queues */
+DEFINE_MUTEX(f_psock_in_queue_mutex);
+DEFINE_MUTEX(f_psock_out_queue_mutex);
+
 spinlock_t f_psock_out_queue_sl;
 spinlock_t f_psock_in_queue_sl;
 
@@ -118,7 +121,6 @@ void f_psock_proxy_handle_in_msg( struct psock_proxy_msg *msg )
 		orig = wait_list_get_msg_id( msg->msg_id );
 		if ( orig != NULL )
 		{
-			printk(KERN_INFO "Got reply on sock_id=%d",msg->sock_id);
 			orig->related = msg;
 			orig->state = MSG_ANSWERED;
 		}
@@ -418,7 +420,6 @@ int f_psock_proxy_connect_socket( f_psock_proxy_socket_t *psk, struct sockaddr *
 	// Now we need to wait for a reply
 	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
 	{
-        	printk(KERN_INFO "f_psock_proxy_connect_socket Got a reply");
 		result =  answer->status;
 		kfree ( answer );
 	};
@@ -506,7 +507,6 @@ int f_psock_proxy_poll_start(int local_id, struct sock *sk)
 	// Now we need to wait for a reply
 	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
 	{
-		printk( "Got a correct answer\n" );
 		kfree ( answer );
 
 		f_psock_lookup[local_id % PSOCK_LOOKUP_SIZE] = sk;
