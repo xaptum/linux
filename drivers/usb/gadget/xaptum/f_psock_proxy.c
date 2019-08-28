@@ -2,11 +2,6 @@
  * @file f_psock_proxy.c 
  * @brief Implementation for the Proxying of the sockets
  */
-
-#include "f_psock_proxy.h"
-#include "f_psock_socket.h"
-#include "psock_proxy_msg.h"
-
 #include <linux/circ_buf.h>
 #include <linux/eventpoll.h>
 #include <linux/printk.h>
@@ -292,11 +287,6 @@ int f_psock_proxy_create_socket( f_psock_proxy_socket_t *psk )
 	psk->is_poll = 0;
 	psk->can_write = 0;
 
-	f_psock_proxy_push_out_msg( msg );
-	f_psock_gadget_sched_process_out_msg();
-
-	f_psock_proxy_wait_send( msg );
-
 	// Free the msg
 	kfree( msg );
 
@@ -323,11 +313,6 @@ int f_psock_proxy_delete_socket( f_psock_proxy_socket_t *psk )
 
 	msg->state = MSG_PENDING;
 	msg->related = NULL;
-
-        f_psock_proxy_push_out_msg( msg );
-	f_psock_gadget_sched_process_out_msg();
-	
-	f_psock_proxy_wait_send( msg );
 
 	kfree( msg );
 
@@ -413,17 +398,6 @@ int f_psock_proxy_connect_socket( f_psock_proxy_socket_t *psk, struct sockaddr *
 	msg->state = MSG_PENDING;
 	msg->related = NULL;
 
-	// Lets push the msg on the out queus
-        f_psock_proxy_push_out_msg( msg );
-        f_psock_gadget_sched_process_out_msg();
-
-	// Now we need to wait for a reply
-	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
-	{
-		result =  answer->status;
-		kfree ( answer );
-	};
-
 	kfree( msg );
 
 	psk->can_write = 1;
@@ -457,21 +431,6 @@ int f_psock_proxy_write_socket( f_psock_proxy_socket_t *fpsk, void *data, size_t
 
 	fpsk->can_write = 0;
 
-        f_psock_proxy_push_out_msg( msg );
-
-        f_psock_gadget_sched_process_out_msg();
-
-        // Now we need to wait for a reply
-        if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
-        {       
-                result =  answer->status;
-		kfree( answer );
-        };
-
-        fpsk->can_write = 1;
-	sk = &container_of(fpsk,struct f_psock_pinfo,psk)->sk;
-	sk->sk_write_space(sk);
-
 	kfree( msg );
         return result;
 
@@ -499,23 +458,6 @@ int f_psock_proxy_poll_start(int local_id, struct sock *sk)
 	msg->state = MSG_PENDING;
 	msg->related = NULL;
 
-	// Lets push the msg on the out queus
-	f_psock_proxy_push_out_msg( msg );
-
-        f_psock_gadget_sched_process_out_msg();
-
-	// Now we need to wait for a reply
-	if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
-	{
-		kfree ( answer );
-
-		f_psock_lookup[local_id % PSOCK_LOOKUP_SIZE] = sk;
-	}
-	else
-	{
-		printk(KERN_ERR "xaprc_proxy: POLL msg to host failed.");
-		result = 1;
-	}
 
 	kfree( msg );
 
@@ -576,26 +518,6 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
 		msg->state = MSG_PENDING;
 		msg->related = NULL;
 
-		f_psock_proxy_push_out_msg( msg );
-
-        	f_psock_gadget_sched_process_out_msg();
-
-		// Now we need to wait for a reply
-		if ( f_psock_proxy_wait_answer( msg, &answer, F_PSOCK_MSG_TIMEOUT ) > 0 )
-		{
-			if(answer && ((int)(answer->status)) > 0)
-			{
-				memcpy( data, answer->data, answer->status );
-				result = answer->status;
-				kfree( answer->data );
-				kfree( answer );
-			}
-			else
-			{
-				printk(KERN_INFO "f_psock_proxy: read_socket: Could not read msg (but answer was given)");
-			}
-		}
-
 		kfree( msg ); 
  	}
 	return result;
@@ -606,31 +528,7 @@ int f_psock_proxy_read_socket( f_psock_proxy_socket_t *psk, void *data, size_t l
  */
 static int f_psock_proxy_push_out_msg( void *msg )
 {
-	struct psock_buf_item *item;
-	unsigned long head;
-	unsigned long tail;
-	int ret;
-
-	ret = XARPCD_FAIL;
-
-	spin_lock(&f_psock_out_queue_sl);
-	head = out_buffer->head;
-	tail = out_buffer->tail;
-
- 	if ( CIRC_SPACE( head, tail, F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item )) >= sizeof(struct psock_buf_item ) )
-	{
-		item = ( struct psock_buf_item *)(&out_buffer->buf[head]);
-		// Setup item
-		item->msg = msg;	
-		// Update head
-		out_buffer->head = (head + sizeof( struct psock_buf_item )) & ( F_PSOCK_BUFF_SIZE * sizeof(struct psock_buf_item )  - 1 );
-
-		ret = F_PSOCK_SUCCESS;
-	}
-	spin_unlock(&f_psock_out_queue_sl);
-
-	return ret;
-
+	return 0;
 }
 
 /**
