@@ -558,7 +558,7 @@ static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
 	else
 	{
 		printk(KERN_INFO "req->buf=%p actual=%d\n",req->buf,req->actual);
-		psock_debug_hex_dump("USB read:", req->buf, req->length);
+		psock_debug_hex_dump("USB read:", req->buf, req->actual);
 	}
 	
 
@@ -575,7 +575,7 @@ static void psock_cmd_read_complete( struct usb_ep *ep, struct usb_request *req)
 	else
 	{
 		printk(KERN_INFO "psock_cmd_read_complete req->buf=%p actual=%d\n",req->buf,req->actual);
-		psock_debug_hex_dump("psock_cmd_read_complete USB read:", req->buf, req->length);
+		psock_debug_hex_dump("psock_cmd_read_complete USB read:", req->buf, req->actual);
 	}
 }
 
