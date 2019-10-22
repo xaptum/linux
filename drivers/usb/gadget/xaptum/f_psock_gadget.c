@@ -705,9 +705,9 @@ static int enable_psock( struct usb_composite_dev *cdev, struct f_psock *psock )
 	RECV_BUFFER = kzalloc(RECV_BUFFER_LEN,GFP_ATOMIC);
 	CMD_RECV_BUFFER = kzalloc(CMD_RECV_BUFFER_LEN,GFP_ATOMIC);
 
-	queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, 1000 );
+	//queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, 1000 );
 	queue_delayed_work( f_psock_gadget_read_work_queue, &f_psock_gadget_read_work, 0 );
-	queue_delayed_work( f_psock_gadget_cmd_write_queue, &f_psock_gadget_cmd_write, 1500 );
+	//queue_delayed_work( f_psock_gadget_cmd_write_queue, &f_psock_gadget_cmd_write, 1500 );
 	queue_delayed_work( f_psock_gadget_cmd_read_queue, &f_psock_gadget_cmd_read, 0 );
 
 	return result;
