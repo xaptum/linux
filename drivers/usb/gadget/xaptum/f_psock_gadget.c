@@ -9,12 +9,11 @@
 
 #include <linux/usb/composite.h>
 
-#include "psock_proxy_msg.h"
-#include "f_psock_proxy.h"
-
 #define PSOCK_PROXY_JIFFIES 50
 #define PSOCK_GADGET_MAX_SEND 5
 #define PSOCK_GADGET_BUF_SIZE 512
+
+#define MAX_CTRL_PACKET_SIZE 64
 
 extern void f_psock_proxy_sched_process_in_msg(void);
 
@@ -41,64 +40,112 @@ struct f_psock_opts {
 struct f_psock {
 	struct usb_function     function;
 
-        struct usb_ep           *in_ep;
-        struct usb_ep           *out_ep;
+        struct usb_ep           *bulk_in_ep;
+        struct usb_ep           *bulk_out_ep;
+        struct usb_ep           *cmd_out_ep;
+        struct usb_ep           *cmd_in_ep;
+        struct usb_ep 		*ep0;
 
         unsigned                qlen;
         unsigned                buflen;
-	
-
 };
-
-/**
- * Forward declarations
- */
-static int alloc_msg_send_request( struct usb_composite_dev *cdev, struct f_psock *psock, struct psock_proxy_msg *msg );
-static int alloc_msg_read_request( struct usb_composite_dev *cdev, struct f_psock *psock );
-
-
-/**************************************************************************
- * Workqueue and related
- **************************************************************************/
-static struct workqueue_struct *f_psock_gadget_work_queue = NULL;
-static struct delayed_work f_psock_gadget_work = {0};
 
 // @todo check for better way to keep this info as this makes it impossible to use more then one instnace
 static struct usb_composite_dev *w_cdev;
 static struct f_psock *w_psock; 
 
-void f_psock_gadget_work_handler( struct work_struct *work )
-{
-	psock_proxy_msg_t * msg = NULL;
-
-	// Check if we have new outgoing msg to send
-	while ( ( f_psock_proxy_pop_out_msg( (void **)&msg ) == 1 ) )
-	{
-		alloc_msg_send_request( w_cdev, w_psock, msg );
-	}
-}
-
-
-
-/***************************************************************************
- * USB DESCRIPTOR DEFINITIONS
- ***************************************************************************/
-
 /*
- * usb interface descriptor
+ * The USB interface descriptor to tell the host
+ * how many endpoints are being deviced, ect.
  */
 static struct usb_interface_descriptor psock_intf = {
 	.bLength = sizeof(psock_intf),
 	.bDescriptorType = USB_DT_INTERFACE,
-	.bNumEndpoints = 2,
+	.bNumEndpoints = 4,
 	.bInterfaceClass = USB_CLASS_VENDOR_SPEC,
 	.bInterfaceSubClass = 0xab,
+};
+
+/***************************************************************************
+ * USB DESCRIPTOR DEFINITIONS
+ * There are 4 descriptors: 
+ *   Bulk In / Out
+ *   Cmd In / Out
+ * There are 3 speeds:
+ *   Full Speed
+ *   High Speed
+ *   Super Speed
+ * Every combination of the above needs its own descriptor. 
+ ***************************************************************************/
+static struct usb_endpoint_descriptor
+f_psock_fs_ctrl_sink_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval	 = 32,
+};
+
+static struct usb_endpoint_descriptor
+f_psock_fs_ctrl_source_desc  = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval 	 = 32,
+};
+
+static struct usb_endpoint_descriptor
+f_psock_hs_ctrl_sink_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
+};
+static struct usb_endpoint_descriptor
+f_psock_hs_ctrl_source_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
+};
+
+
+static struct usb_endpoint_descriptor
+f_psock_ss_ctrl_sink_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
+};
+static struct usb_endpoint_descriptor
+f_psock_ss_ctrl_source_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
 };
 
 /**
  * Full speed endpoint descriptors
  */
-static struct usb_endpoint_descriptor fs_psock_source_desc =  {
+static struct usb_endpoint_descriptor f_psock_fs_bulk_source_desc =  {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -108,8 +155,7 @@ static struct usb_endpoint_descriptor fs_psock_source_desc =  {
 
 };
 
-
-static struct usb_endpoint_descriptor fs_psock_sink_desc = {
+static struct usb_endpoint_descriptor f_psock_fs_bulk_sink_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -120,15 +166,17 @@ static struct usb_endpoint_descriptor fs_psock_sink_desc = {
 
 static struct usb_descriptor_header *fs_psock_descs[] = {
  	(struct usb_descriptor_header *) &psock_intf,
-        (struct usb_descriptor_header *) &fs_psock_sink_desc,
-        (struct usb_descriptor_header *) &fs_psock_source_desc,
+        (struct usb_descriptor_header *) &f_psock_fs_bulk_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_fs_bulk_source_desc,
+        (struct usb_descriptor_header *) &f_psock_fs_ctrl_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_fs_ctrl_source_desc,
         NULL,
 };
 
 /**
  * High speed descriptors
  */
-static struct usb_endpoint_descriptor hs_psock_source_desc = {
+static struct usb_endpoint_descriptor f_psock_hs_bulk_source_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -136,7 +184,7 @@ static struct usb_endpoint_descriptor hs_psock_source_desc = {
         .wMaxPacketSize =       cpu_to_le16(512),
 };
 
-static struct usb_endpoint_descriptor hs_psock_sink_desc = {
+static struct usb_endpoint_descriptor f_psock_hs_bulk_sink_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -146,15 +194,18 @@ static struct usb_endpoint_descriptor hs_psock_sink_desc = {
 
 static struct usb_descriptor_header *hs_psock_descs[] = {
         (struct usb_descriptor_header *) &psock_intf,
-        (struct usb_descriptor_header *) &hs_psock_source_desc,
-        (struct usb_descriptor_header *) &hs_psock_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_hs_bulk_source_desc,
+        (struct usb_descriptor_header *) &f_psock_hs_bulk_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_hs_ctrl_source_desc,
+        (struct usb_descriptor_header *) &f_psock_hs_ctrl_sink_desc,
+
         NULL,
 };
 
 /**
  * Superspeed descriptors
  */
-static struct usb_endpoint_descriptor ss_psock_source_desc = {
+static struct usb_endpoint_descriptor f_psock_ss_bulk_source_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -162,7 +213,7 @@ static struct usb_endpoint_descriptor ss_psock_source_desc = {
         .wMaxPacketSize =       cpu_to_le16(1024),
 };
 
-static struct usb_ss_ep_comp_descriptor ss_psock_source_comp_desc = {
+static struct usb_ss_ep_comp_descriptor f_psock_ss_bulk_source_comp_desc = {
         .bLength =              USB_DT_SS_EP_COMP_SIZE,
         .bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
         .bMaxBurst =            0,
@@ -170,7 +221,17 @@ static struct usb_ss_ep_comp_descriptor ss_psock_source_comp_desc = {
         .wBytesPerInterval =    0,
 };
 
-static struct usb_endpoint_descriptor ss_psock_sink_desc = {
+static struct usb_ss_ep_comp_descriptor f_psock_ss_ctrl_comp_desc = {
+	.bLength =		sizeof f_psock_ss_ctrl_comp_desc,
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 3 values can be tweaked if necessary */
+	/* .bMaxBurst =		0, */
+	/* .bmAttributes =	0, */
+	.wBytesPerInterval =	cpu_to_le16(16),
+};
+
+static struct usb_endpoint_descriptor f_psock_ss_bulk_sink_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -178,7 +239,7 @@ static struct usb_endpoint_descriptor ss_psock_sink_desc = {
         .wMaxPacketSize =       cpu_to_le16(1024),
 };
 
-static struct usb_ss_ep_comp_descriptor ss_psock_sink_comp_desc = {
+static struct usb_ss_ep_comp_descriptor f_psock_ss_bulk_sink_comp_desc = {
         .bLength =              USB_DT_SS_EP_COMP_SIZE,
         .bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
         .bMaxBurst =            0,
@@ -188,10 +249,18 @@ static struct usb_ss_ep_comp_descriptor ss_psock_sink_comp_desc = {
 
 static struct usb_descriptor_header *ss_psock_descs[] = {
         (struct usb_descriptor_header *) &psock_intf,
-        (struct usb_descriptor_header *) &ss_psock_source_desc,
-        (struct usb_descriptor_header *) &ss_psock_source_comp_desc,
-        (struct usb_descriptor_header *) &ss_psock_sink_desc,
-        (struct usb_descriptor_header *) &ss_psock_sink_comp_desc,
+
+        (struct usb_descriptor_header *) &f_psock_ss_bulk_source_desc,
+        (struct usb_descriptor_header *) &f_psock_ss_bulk_source_comp_desc,
+
+        (struct usb_descriptor_header *) &f_psock_ss_bulk_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_ss_bulk_sink_comp_desc,
+
+        (struct usb_descriptor_header *) &f_psock_ss_ctrl_sink_desc,
+        (struct usb_descriptor_header *) &f_psock_ss_ctrl_comp_desc,
+
+        (struct usb_descriptor_header *) &f_psock_ss_ctrl_source_desc,
+        (struct usb_descriptor_header *) &f_psock_ss_ctrl_comp_desc,
         NULL,
 };
 
@@ -214,80 +283,102 @@ static struct usb_gadget_strings *psock_strings[] = {
 };
 
 
-/**********************************************************************
- *
- **********************************************************************/
-
-
 /**
  * usb allocation
  */
-
 static inline struct f_psock *func_to_psock(struct usb_function *f)
 {
         return container_of(f, struct f_psock, function);
 }
 
 
+/* Binds this driver to a device */
 static int psock_bind( struct usb_configuration *c, struct usb_function *f)
 {
-	struct usb_composite_dev *cdev = c->cdev;
-	struct f_psock *psock = func_to_psock(f);
+	struct usb_composite_dev *cdev;
+	struct f_psock *psock;
 	int id;
 	int ret;
 
+	cdev = c->cdev;
+	psock = func_to_psock(f);
+
 	id = usb_interface_id(c,f);
 	if (id < 0 )
-	{
-		return id;
-	}
+		return -ENODEV;
+
 	psock_intf.bInterfaceNumber = id;
 
 	id = usb_string_id(cdev);
-	if (id < 0 ) return id;
+	if (id < 0 ) 
+		return -ENODEV;
 
 
 	strings_psock[0].id = id;
 	psock_intf.iInterface = id;
 
-	psock->in_ep = usb_ep_autoconfig(cdev->gadget, &fs_psock_source_desc );
-	if (!psock->in_ep) {
-	        ERROR(cdev, "%s: can't autoconfigure on %s\n",
+	/* Set up the bulk and command endpoints */
+	psock->bulk_in_ep = usb_ep_autoconfig(cdev->gadget, &f_psock_fs_bulk_source_desc );
+	if (!psock->bulk_in_ep) {
+	        printk(KERN_ERR "%s: can't autoconfigure bulk source on %s\n",
                         f->name, cdev->gadget->name);
                 return -ENODEV;
 
 	}
 
-	psock->out_ep = usb_ep_autoconfig(cdev->gadget, &fs_psock_sink_desc );
-	if (!psock->out_ep)
+	psock->bulk_out_ep = usb_ep_autoconfig(cdev->gadget, &f_psock_fs_bulk_sink_desc );
+	if (!psock->bulk_out_ep)
 	{
-		ERROR(cdev, "%s: can't autoconfigure on %s\n",
+		printk(KERN_ERR "%s: can't autoconfigure bulk sink on %s\n",
                         f->name, cdev->gadget->name);
                 return -ENODEV;
 
+	}
+
+	psock->cmd_out_ep = usb_ep_autoconfig(cdev->gadget, &f_psock_fs_ctrl_sink_desc );
+	if (!psock->cmd_out_ep)
+	{
+		printk(KERN_ERR "%s: can't autoconfigure control source on %s\n",
+			f->name, cdev->gadget->name);
+		return -ENODEV;
+	}
+
+	psock->cmd_in_ep = usb_ep_autoconfig(cdev->gadget, &f_psock_fs_ctrl_source_desc );
+	if (!psock->cmd_in_ep)
+	{
+		printk(KERN_ERR "%s: can't autoconfigure control sink on %s\n",
+		f->name, cdev->gadget->name);
+		return -ENODEV;
 	}
 
 	/* support high speed hardware */
-        hs_psock_source_desc.bEndpointAddress =
-                fs_psock_source_desc.bEndpointAddress;
-        hs_psock_sink_desc.bEndpointAddress = fs_psock_sink_desc.bEndpointAddress;
-
+        f_psock_hs_bulk_source_desc.bEndpointAddress = f_psock_fs_bulk_source_desc.bEndpointAddress;
+        f_psock_hs_bulk_sink_desc.bEndpointAddress   = f_psock_fs_bulk_sink_desc.bEndpointAddress;
+	f_psock_hs_ctrl_source_desc.bEndpointAddress = f_psock_fs_ctrl_source_desc.bEndpointAddress;
+	f_psock_hs_ctrl_sink_desc.bEndpointAddress   = f_psock_fs_ctrl_sink_desc.bEndpointAddress;
+	
         /* support super speed hardware */
-        ss_psock_source_desc.bEndpointAddress =
-                fs_psock_source_desc.bEndpointAddress;
-        ss_psock_sink_desc.bEndpointAddress = fs_psock_sink_desc.bEndpointAddress;
+        f_psock_ss_bulk_source_desc.bEndpointAddress = f_psock_fs_bulk_source_desc.bEndpointAddress;
+        f_psock_ss_bulk_sink_desc.bEndpointAddress   = f_psock_fs_bulk_sink_desc.bEndpointAddress;
+	f_psock_ss_ctrl_source_desc.bEndpointAddress = f_psock_fs_ctrl_source_desc.bEndpointAddress;
+	f_psock_ss_ctrl_sink_desc.bEndpointAddress   = f_psock_fs_ctrl_sink_desc.bEndpointAddress;
 
+        /* Copy the descriptors to the function */
  	ret = usb_assign_descriptors(f, fs_psock_descs, hs_psock_descs,
                         ss_psock_descs, NULL);
+ 	if(ret<0)
+ 		return -ENOMEM;
 
-
-	return ret;
+	printk(KERN_INFO "SCM bind complete at %s speed\n",
+				gadget_is_superspeed(c->cdev->gadget) ? "super" :
+				gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full");
+	return 0;
 }
 
 static void psock_free_func( struct usb_function *f )
 {
 	struct f_psock_opts *opts;
-
+	
         opts = container_of(f->fi, struct f_psock_opts, func_inst);
 
         mutex_lock(&opts->lock);
@@ -301,138 +392,15 @@ static void psock_free_func( struct usb_function *f )
 static int enable_endpoint( struct usb_composite_dev *cdev, struct f_psock *psock, struct usb_ep *ep )
 {
 	int result;
+
 	result = config_ep_by_speed( cdev->gadget, &(psock->function), ep );
 
 	result = usb_ep_enable(ep);
 
 	ep->driver_data = psock;
 
-	result = 0;
-
-	return result;
+	return 0;
 }
-
-
-static void psock_send_complete( struct usb_ep *ep, struct usb_request *req )
-{
-	struct psock_proxy_msg *msg = req->context;
-
-	if ( msg != NULL )
-	{
-		msg->state = MSG_SEND;
-		f_psock_proxy_sched_process_in_msg();
-	}
-}
-
-/* Recieves an incoming message from the host and passes it to the proxy */
-static void psock_read_complete( struct usb_ep *ep, struct usb_request *req )
-{
-
-	// Push the msg to the proxy
-	psock_proxy_msg_packet_t *packet = req->buf;
-	psock_proxy_msg_t *msg = kmalloc( sizeof( struct psock_proxy_msg ) , GFP_KERNEL );
-
-	psock_proxy_packet_to_msg(packet,msg);
-
-	if ( msg->length > req->length )
-	{
-		printk( KERN_ERR "Incomplete msg received\n" );
-	}
-
-	if ( msg->length > sizeof( psock_proxy_msg_t ) )
-	{
-		msg->data = kmalloc( msg->length - sizeof( psock_proxy_msg_t ), GFP_KERNEL );
-		memcpy( msg->data,  packet->data , msg->length - sizeof(psock_proxy_msg_t) );
-	}
-	else
-	{
-		msg->data = NULL;
-	}
-
-	// Done creating in msg, lets move in to the proxy
-	f_psock_proxy_push_in_msg( msg );
-
-	//Schedule a work task to process the message
-	f_psock_proxy_sched_process_in_msg();
-
-	// Prepare for next read
-	alloc_msg_read_request(w_cdev, w_psock);
-}
-
-static int alloc_msg_send_request( struct usb_composite_dev *cdev, struct f_psock *psock, struct psock_proxy_msg *msg )
-{
-	struct usb_request *out_req;
-	size_t data_len;
-	psock_proxy_msg_packet_t *packet;
-	uint32_t packet_len;
-
-	//Calculate the length of the outgoing packet
-	data_len = msg->length - sizeof(psock_proxy_msg_t);
-	packet_len = data_len+sizeof(psock_proxy_msg_packet_t);
-
-	out_req = usb_ep_alloc_request( psock->in_ep, GFP_ATOMIC );
-	out_req->buf = kmalloc( data_len+sizeof(psock_proxy_msg_packet_t), GFP_ATOMIC );
-	packet = out_req->buf;
-
-	//Copy the message fields to the outgoing packet
-	psock_proxy_msg_to_packet(msg,packet);
-
-	//Set the out request length to the pacekts size
-	out_req->length = packet_len;
-
-	// TODO Check if not to big also
-	if ( data_len > 0 )
-	{
-		/* Copy the data to the remainder of the allocated space */
-		memcpy( packet->data, msg->data, data_len );
-	}
-
-
-	// We put a pointer to the msg in the context
-	out_req->context = msg;
-
-	out_req->complete = psock_send_complete;
-	usb_ep_queue( psock->in_ep, out_req, GFP_ATOMIC );
-
-	return 0;	
-}
-
-
-static int alloc_msg_read_request( struct usb_composite_dev *cdev, struct f_psock *psock )
-{
-	struct usb_request *out_req;
-
-	out_req = usb_ep_alloc_request( psock->out_ep, GFP_ATOMIC );
-	out_req->length = sizeof( psock_proxy_msg_packet_t ) + PSOCK_GADGET_BUF_SIZE;
-	out_req->buf = kmalloc( out_req->length, GFP_ATOMIC );
-	out_req->dma = 0;
-	out_req->complete = psock_read_complete;
-	usb_ep_queue( psock->out_ep, out_req, GFP_ATOMIC );
-
-	return 0;	
-}
-
-
-
-/**
- * Function allocathes the initial usb requests, for reading and writing.
- */
-static int alloc_requests( struct usb_composite_dev *cdev, struct f_psock *psock )
-{
-	int result = 0;
-
-	struct psock_proxy_msg msg = {0};
-
-	msg.type = F_PSOCK_MSG_NONE;
-	msg.length = sizeof(struct psock_proxy_msg );
-	
-	alloc_msg_send_request( cdev, psock , &msg );
-	alloc_msg_read_request( cdev, psock ); 
-
-	return result;
-
-}
-
 /**
  * @todo add error out that disables endpoint when fail
  * @todo check if its better two use 2 functions for the complete part
@@ -440,10 +408,25 @@ static int alloc_requests( struct usb_composite_dev *cdev, struct f_psock *psock
 static int enable_psock( struct usb_composite_dev *cdev, struct f_psock *psock )
 {
 	int result = 0;
+
+	printk(KERN_INFO "enable_psock enter");
+
 	// Enable the endpoints
-	result = enable_endpoint( cdev, psock, psock->in_ep );
-	result = enable_endpoint( cdev, psock, psock->out_ep );	
-	result = alloc_requests( cdev, psock );
+	result = enable_endpoint( cdev, psock, psock->bulk_in_ep );
+	if(result)
+		printk(KERN_ERR "enable_endpoint for bulk_in_ep failed ret=%d",result);
+
+	result = enable_endpoint( cdev, psock, psock->bulk_out_ep );	
+	if(result)
+		printk(KERN_ERR "enable_endpoint for bulk_out_ep failed ret=%d",result);
+	
+	result = enable_endpoint( cdev, psock, psock->cmd_in_ep );
+	if(result)
+		printk(KERN_ERR "enable_endpoint for cmd_in_ep failed ret=%d",result);
+
+	result = enable_endpoint( cdev, psock, psock->cmd_out_ep );	
+	if(result)
+		printk(KERN_ERR "enable_endpoint for cmd_out_ep failed ret=%d",result);
 
 	// @todo check for better way to pass these structs
 	w_cdev = cdev;
@@ -456,8 +439,10 @@ static void disable_psock(struct f_psock *psock )
 {
 	if(psock)
 	{
-		usb_ep_disable(psock->in_ep);
-		usb_ep_disable(psock->out_ep);
+		usb_ep_disable(psock->bulk_in_ep);
+		usb_ep_disable(psock->bulk_out_ep);
+		usb_ep_disable(psock->cmd_in_ep);
+		usb_ep_disable(psock->cmd_out_ep);
 	}
 }
 
@@ -484,7 +469,7 @@ static void psock_disable(struct usb_function *f )
 {
 	struct f_psock	*sock = func_to_psock(f);
 
-	disable_psock(sock);	
+	disable_psock(sock);
 }
 
 
@@ -492,7 +477,6 @@ static struct usb_function *psock_alloc(struct usb_function_instance *fi)
 {
 	struct f_psock_opts *psock_opts;
 	struct f_psock *psock;
-
 
 	psock = kzalloc( (sizeof *psock ), GFP_KERNEL );
 	if ( !psock )
@@ -516,12 +500,11 @@ static struct usb_function *psock_alloc(struct usb_function_instance *fi)
         psock->function.strings = psock_strings;
 
         psock->function.free_func = psock_free_func;
+	printk(KERN_INFO "psock_alloc exit");
 
         return &psock->function;
 
 }
-
-
 
 /**
  *
@@ -533,9 +516,6 @@ static inline struct f_psock_opts *to_f_psock_opts(struct config_item *item)
         return container_of(to_config_group(item), struct f_psock_opts,
                             func_inst.group);
 }
-
-
-
 static ssize_t f_psock_opts_bulk_buflen_show(struct config_item *item, char *page)
 {
         struct f_psock_opts *opts = to_f_psock_opts(item);
@@ -547,7 +527,6 @@ static ssize_t f_psock_opts_bulk_buflen_show(struct config_item *item, char *pag
 
         return result;
 }
-
 static ssize_t f_psock_opts_bulk_buflen_store(struct config_item *item,
                                     const char *page, size_t len)
 {
@@ -682,12 +661,6 @@ int f_psock_init_gadget( void )
 {
 	usb_function_register( &psockusb_func );
 
-	// Initialize the work struct
-	INIT_DELAYED_WORK( &f_psock_gadget_work, f_psock_gadget_work_handler );
-	f_psock_gadget_work_queue = create_workqueue( "f_psock_gadget_work_queue" );
-
-	// Messages may have been queued before this point
-	f_psock_gadget_sched_process_out_msg();
 	return 0;
 }
 
@@ -696,11 +669,4 @@ int f_psock_cleanup_gadget( void )
 {
 	usb_function_unregister( &psockusb_func);
 	return 0;
-}
-
-
-void f_psock_gadget_sched_process_out_msg(void)
-{
-	if(f_psock_gadget_work_queue)
-		queue_delayed_work( f_psock_gadget_work_queue, &f_psock_gadget_work, 0 );
 }
