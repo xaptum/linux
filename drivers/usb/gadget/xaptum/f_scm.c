@@ -6,19 +6,10 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
-
 #include <linux/usb/composite.h>
+#include "u_scm.h"
 
 #define MAX_INT_PACKET_SIZE 64
-
-/**************************************************************************
- *  f_scm structure definitions
- **************************************************************************/
-struct f_scm_opts {
-	struct usb_function_instance func_inst;
-	struct mutex lock;
-	int refcnt; 
-};
 
 /**
  * Usb function structure definition
@@ -561,6 +552,9 @@ static void __exit f_scm_exit(void)
 {
 	usb_function_unregister( &scmusb_func);
 }
+
+module_init( f_scm_init );
+module_exit( f_scm_exit );
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
