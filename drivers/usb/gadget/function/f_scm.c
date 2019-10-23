@@ -11,6 +11,14 @@
 #include <linux/usb/composite.h>
 #include "u_scm.h"
 
+/*
+ * This function is a "Socket Control Module" (SCM) link. The purpose of
+ * SCM is to allow a device to manage and communicate over socekts on its
+ * host. SCMs data transfer model uses bulk endpoints (short packet terminated)
+ * to send and recieve data from the hosts sockets and interrupt endpoints to
+ * communcate socket management data (open, connect, ect).
+ */
+
 #define MAX_INT_PACKET_SIZE 64
 
 /**
