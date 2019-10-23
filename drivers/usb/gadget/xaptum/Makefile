@@ -1,3 +1,3 @@
-f_psock-y := f_psock_main.o  f_psock_gadget.o 
+f_scm-y := f_scm_main.o  f_scm_gadget.o 
 ccflags-y := -g
-obj-$(CONFIG_USB_F_XAPTUM_PSOCK) += f_psock.o
+obj-$(CONFIG_USB_F_XAPTUM_SCM) += f_scm.o

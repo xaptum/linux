@@ -1,5 +1,5 @@
 /**
- * @file f_psock_main.c
+ * @file f_scm_main.c
  * @brief Entry for the SCM driver
  * @author Daniel Berliner
  */
@@ -14,7 +14,7 @@
 #include <linux/kernel.h>
 #include <linux/printk.h>
 
-#include "f_psock_gadget.h"
+#include "f_scm_gadget.h"
 
 
 MODULE_LICENSE("GPL v2");
@@ -23,17 +23,17 @@ MODULE_DESCRIPTION("Xaptum SCM Driver");
 MODULE_VERSION("0.0.1");
 
 
-static int __init f_psock_init(void)
+static int __init f_scm_init(void)
 {
-	f_psock_init_gadget();
+	f_scm_init_gadget();
 	return 0;
 }
 
-static void __exit f_psock_exit(void)
+static void __exit f_scm_exit(void)
 {
-	f_psock_cleanup_gadget();
+	f_scm_cleanup_gadget();
 }
 
 
-module_init( f_psock_init );
-module_exit( f_psock_exit );
+module_init( f_scm_init );
+module_exit( f_scm_exit );
