@@ -551,16 +551,18 @@ static struct usb_function_instance *scm_alloc_inst(void)
 
 DECLARE_USB_FUNCTION(scm, scm_alloc_inst, scm_alloc);
 
-int f_scm_init_gadget( void )
+static int __init f_scm_init(void)
 {
 	usb_function_register( &scmusb_func );
-
 	return 0;
 }
 
-
-int f_scm_cleanup_gadget( void )
+static void __exit f_scm_exit(void)
 {
 	usb_function_unregister( &scmusb_func);
-	return 0;
 }
+
+MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("Daniel Berliner");
+MODULE_DESCRIPTION("Xaptum SCM Driver");
+MODULE_VERSION("0.0.1");
