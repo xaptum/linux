@@ -1,8 +1,8 @@
 /**
  * @file u_scm.h
  */
-#ifndef _F_SCM_GADGET_H_
-#define _F_SCM_GADGET_H_
+#ifndef _U_SCM_H_
+#define _U_SCM_H_
 
 struct f_scm_opts {
 	struct usb_function_instance func_inst;
