@@ -1,5 +1,8 @@
-/**
- * @file u_scm.h
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * u_scm.h -- USB Socket Control Module (SCM) function driver
+ *
+ * Copyright (C) 2018-2019 Xaptum, Inc.
  */
 #ifndef _U_SCM_H_
 #define _U_SCM_H_

@@ -1,6 +1,8 @@
-/**
- * @file f_scm_gadget.c
- * @brief Usb gadget / composite framework integration for the f_scm kernel module
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * f_scm.c -- USB Socket Control Module (SCM) function driver
+ *
+ * Copyright (C) 2018-2019 Xaptum, Inc.
  */
 
 #include <linux/kernel.h>
