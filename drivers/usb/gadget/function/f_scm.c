@@ -20,6 +20,7 @@
  */
 
 #define MAX_INT_PACKET_SIZE 64
+#define SCM_INTERFACE_SUBCLASS 0xab
 
 /**
  * Usb function structure definition
@@ -47,7 +48,7 @@ static struct usb_interface_descriptor scm_intf = {
 	.bDescriptorType = USB_DT_INTERFACE,
 	.bNumEndpoints = 4,
 	.bInterfaceClass = USB_CLASS_VENDOR_SPEC,
-	.bInterfaceSubClass = 0xab,
+	.bInterfaceSubClass = SCM_INTERFACE_SUBCLASS,
 };
 
 /***************************************************************************
