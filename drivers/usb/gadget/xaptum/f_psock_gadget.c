@@ -9,13 +9,7 @@
 
 #include <linux/usb/composite.h>
 
-#define PSOCK_PROXY_JIFFIES 50
-#define PSOCK_GADGET_MAX_SEND 5
-#define PSOCK_GADGET_BUF_SIZE 512
-
-#define MAX_CTRL_PACKET_SIZE 64
-
-extern void f_psock_proxy_sched_process_in_msg(void);
+#define MAX_INT_PACKET_SIZE 64
 
 /**************************************************************************
  *  f_psock structure definitions
@@ -84,7 +78,7 @@ f_psock_fs_ctrl_sink_desc = {
 
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval	 = 32,
 };
 
@@ -95,7 +89,7 @@ f_psock_fs_ctrl_source_desc  = {
 
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval 	 = 32,
 };
 
@@ -106,7 +100,7 @@ f_psock_hs_ctrl_sink_desc = {
 
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
 };
 static struct usb_endpoint_descriptor
@@ -116,7 +110,7 @@ f_psock_hs_ctrl_source_desc = {
 
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
 };
 
@@ -128,7 +122,7 @@ f_psock_ss_ctrl_sink_desc = {
 
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
 };
 static struct usb_endpoint_descriptor
@@ -138,7 +132,7 @@ f_psock_ss_ctrl_source_desc = {
 
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_CTRL_PACKET_SIZE),
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
 };
 
