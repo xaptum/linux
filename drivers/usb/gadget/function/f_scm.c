@@ -27,6 +27,8 @@
 struct f_scm {
 	struct usb_function     function;
 
+	struct usb_composite_dev *cdev;
+
         struct usb_ep           *bulk_in_ep;
         struct usb_ep           *bulk_out_ep;
         struct usb_ep           *cmd_out_ep;
@@ -35,8 +37,6 @@ struct f_scm {
 };
 
 // @todo check for better way to keep this info as this makes it impossible to use more then one instnace
-static struct usb_composite_dev *w_cdev;
-static struct f_scm *w_scm; 
 
 /*
  * The USB interface descriptor to tell the host
@@ -413,8 +413,7 @@ static int enable_scm( struct usb_composite_dev *cdev, struct f_scm *scm )
 		printk(KERN_ERR "enable_endpoint for cmd_out_ep failed ret=%d",result);
 
 	// @todo check for better way to pass these structs
-	w_cdev = cdev;
-	w_scm = scm;
+	scm->cdev = cdev;
 
 	return result;
 }
