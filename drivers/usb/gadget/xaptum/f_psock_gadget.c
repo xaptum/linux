@@ -14,18 +14,10 @@
 /**************************************************************************
  *  f_psock structure definitions
  **************************************************************************/
-
-/**
- * Usb function instance structure definition
- */
 struct f_psock_opts {
 	struct usb_function_instance func_inst;
-
-	unsigned bulk_buflen;
-	unsigned qlen;
-
 	struct mutex lock;
-	int refcnt;
+	int refcnt; 
 };
 
 /**
@@ -39,9 +31,6 @@ struct f_psock {
         struct usb_ep           *cmd_out_ep;
         struct usb_ep           *cmd_in_ep;
         struct usb_ep 		*ep0;
-
-        unsigned                qlen;
-        unsigned                buflen;
 };
 
 // @todo check for better way to keep this info as this makes it impossible to use more then one instnace
@@ -484,9 +473,6 @@ static struct usb_function *psock_alloc(struct usb_function_instance *fi)
 	psock_opts->refcnt++;
 	mutex_unlock(&psock_opts->lock);
 
-	psock->buflen = psock_opts->bulk_buflen;
-	psock->qlen = psock_opts->qlen;
-
         psock->function.name = "psock";
         psock->function.bind = psock_bind;
         psock->function.set_alt = psock_set_alt;
@@ -510,94 +496,12 @@ static inline struct f_psock_opts *to_f_psock_opts(struct config_item *item)
         return container_of(to_config_group(item), struct f_psock_opts,
                             func_inst.group);
 }
-static ssize_t f_psock_opts_bulk_buflen_show(struct config_item *item, char *page)
-{
-        struct f_psock_opts *opts = to_f_psock_opts(item);
-        int result;
-
-        mutex_lock(&opts->lock);
-        result = sprintf(page, "%d\n", opts->bulk_buflen);
-        mutex_unlock(&opts->lock);
-
-        return result;
-}
-static ssize_t f_psock_opts_bulk_buflen_store(struct config_item *item,
-                                    const char *page, size_t len)
-{
-        struct f_psock_opts *opts = to_f_psock_opts(item);
-        int ret;
-        u32 num;
-
-        mutex_lock(&opts->lock);
-        if (opts->refcnt) {
-                ret = -EBUSY;
-                goto end;
-        }
-
-        ret = kstrtou32(page, 0, &num);
-        if (ret)
-                goto end;
-
-        opts->bulk_buflen = num;
-        ret = len;
-end:
-        mutex_unlock(&opts->lock);
-        return ret;
-}
-
-
-
-CONFIGFS_ATTR(f_psock_opts_, bulk_buflen);
-
-static ssize_t f_psock_opts_qlen_show(struct config_item *item, char *page)
-{
-        struct f_psock_opts *opts = to_f_psock_opts(item);
-        int result;
-
-        mutex_lock(&opts->lock);
-        result = sprintf(page, "%d\n", opts->qlen);
-        mutex_unlock(&opts->lock);
-
-        return result;
-}
-
-
-
-static ssize_t f_psock_opts_qlen_store(struct config_item *item,
-                                    const char *page, size_t len)
-{
-        struct f_psock_opts *opts = to_f_psock_opts(item);
-        int ret;
-        u32 num;
-
-        mutex_lock(&opts->lock);
-        if (opts->refcnt) {
-                ret = -EBUSY;
-                goto end;
-        }
-
-        ret = kstrtou32(page, 0, &num);
-        if (ret)
-                goto end;
-
-        opts->qlen = num;
-        ret = len;
-end:
-        mutex_unlock(&opts->lock);
-        return ret;
-}
-
-
-
-CONFIGFS_ATTR(f_psock_opts_, qlen);
 
 static void psock_attr_release(struct config_item *item)
 {
         struct f_psock_opts *psock_opts = to_f_psock_opts(item);
-
         usb_put_function_instance(&psock_opts->func_inst);
 }
-
 
 static struct configfs_item_operations psock_item_ops = {
         .release                = psock_attr_release,
@@ -605,8 +509,6 @@ static struct configfs_item_operations psock_item_ops = {
 
 
 static struct configfs_attribute *psock_attrs[] = {
-        &f_psock_opts_attr_qlen,
-        &f_psock_opts_attr_bulk_buflen,
         NULL,
 };
 
@@ -640,8 +542,6 @@ static struct usb_function_instance *psock_alloc_inst(void)
 	mutex_init(&psock_opts->lock);
 
 	psock_opts->func_inst.free_func_inst = psock_free_instance;
-	psock_opts->bulk_buflen = PSOCK_GADGET_BUF_SIZE;
-	psock_opts->qlen = 1; // At the moment we test with 1 queued transmission
 
 	config_group_init_type_name( &psock_opts->func_inst.group, "", &psock_func_type);
 
