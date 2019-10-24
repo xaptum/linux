@@ -196,10 +196,6 @@ ss_scm_cmd_out_desc = {
 static struct usb_ss_ep_comp_descriptor ss_scm_cmd_comp_desc = {
 	.bLength =		sizeof(ss_scm_cmd_comp_desc),
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
-
-	/* the following 3 values can be tweaked if necessary */
-	/* .bMaxBurst =		0, */
-	/* .bmAttributes =	0, */
 	.wBytesPerInterval =	cpu_to_le16(MAX_INT_PACKET_SIZE),
 };
 
@@ -214,8 +210,6 @@ static struct usb_endpoint_descriptor ss_scm_in_desc = {
 static struct usb_ss_ep_comp_descriptor ss_scm_in_comp_desc = {
 	.bLength =              USB_DT_SS_EP_COMP_SIZE,
 	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
-	.bMaxBurst =            0,
-	.bmAttributes =         0,
 	.wBytesPerInterval =    0,
 };
 
