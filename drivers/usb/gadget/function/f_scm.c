@@ -352,13 +352,14 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	/* Copy the descriptors to the function */
 	ret = usb_assign_descriptors(f, scm_fs_descs, scm_hs_descs,
 			scm_ss_descs, NULL);
-	if (ret < 0)
-		return -ENOMEM;
+	if (ret)
+		goto fail;
 
 	DBG(cdev, "SCM bind complete at %s speed\n",
 		gadget_is_superspeed(c->cdev->gadget) ? "super" :
 		gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full");
-	return 0;
+fail:
+	return ret;
 }
 
 static void scm_free_func(struct usb_function *f)
