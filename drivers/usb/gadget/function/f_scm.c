@@ -105,7 +105,7 @@ static struct usb_endpoint_descriptor fs_scm_out_desc =  {
 
 
 };
-static struct usb_descriptor_header *fs_scm_descs[] = {
+static struct usb_descriptor_header *scm_fs_descs[] = {
  	(struct usb_descriptor_header *) &scm_intf,
         (struct usb_descriptor_header *) &fs_scm_in_desc,
         (struct usb_descriptor_header *) &fs_scm_out_desc,
@@ -154,7 +154,7 @@ static struct usb_endpoint_descriptor hs_scm_out_desc = {
         .bmAttributes =         USB_ENDPOINT_XFER_BULK,
         .wMaxPacketSize =       cpu_to_le16(512),
 };
-static struct usb_descriptor_header *hs_scm_descs[] = {
+static struct usb_descriptor_header *scm_hs_descs[] = {
         (struct usb_descriptor_header *) &scm_intf,
         (struct usb_descriptor_header *) &hs_scm_out_desc,
         (struct usb_descriptor_header *) &hs_scm_in_desc,
@@ -230,7 +230,7 @@ static struct usb_ss_ep_comp_descriptor ss_scm_out_comp_desc = {
         .wBytesPerInterval =    0,
 };
 
-static struct usb_descriptor_header *ss_scm_descs[] = {
+static struct usb_descriptor_header *scm_ss_descs[] = {
         (struct usb_descriptor_header *) &scm_intf,
 
         (struct usb_descriptor_header *) &ss_scm_out_desc,
@@ -347,8 +347,8 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 	ss_scm_ctrl_in_desc.bEndpointAddress   = fs_scm_ctrl_in_desc.bEndpointAddress;
 
         /* Copy the descriptors to the function */
- 	ret = usb_assign_descriptors(f, fs_scm_descs, hs_scm_descs,
-                        ss_scm_descs, NULL);
+ 	ret = usb_assign_descriptors(f, scm_fs_descs, scm_hs_descs,
+                        scm_ss_descs, NULL);
  	if(ret<0)
  		return -ENOMEM;
 
