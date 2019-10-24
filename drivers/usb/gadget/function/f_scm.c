@@ -382,12 +382,16 @@ static int enable_endpoint(struct usb_composite_dev *cdev, struct f_scm *scm,
 	int result;
 
 	result = config_ep_by_speed(cdev->gadget, &(scm->function), ep);
+	if (result)
+		goto out;
 
 	result = usb_ep_enable(ep);
-
+	if (result<0)
+		goto out;
 	ep->driver_data = scm;
-
-	return 0;
+	result = 0;
+out:
+	return result;
 }
 
 /**
