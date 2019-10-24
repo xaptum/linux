@@ -48,6 +48,7 @@ struct f_scm {
 static struct usb_interface_descriptor scm_intf = {
 	.bLength            = sizeof(scm_intf),
 	.bDescriptorType    = USB_DT_INTERFACE,
+
 	.bNumEndpoints      = 4,
 	.bInterfaceClass    = USB_CLASS_VENDOR_SPEC,
 	.bInterfaceSubClass = SCM_SUBCLASS,
@@ -89,6 +90,7 @@ fs_scm_cmd_out_desc = {
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        SCM_STATUS_INTERVAL_MS,
 };
+
 static struct usb_endpoint_descriptor fs_scm_in_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
@@ -97,6 +99,7 @@ static struct usb_endpoint_descriptor fs_scm_in_desc = {
 	.bmAttributes =     USB_ENDPOINT_XFER_BULK,
 
 };
+
 static struct usb_endpoint_descriptor fs_scm_out_desc =  {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
@@ -104,8 +107,8 @@ static struct usb_endpoint_descriptor fs_scm_out_desc =  {
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes =     USB_ENDPOINT_XFER_BULK,
 
-
 };
+
 static struct usb_descriptor_header *scm_fs_descs[] = {
 	(struct usb_descriptor_header *) &scm_intf,
 	(struct usb_descriptor_header *) &fs_scm_in_desc,
@@ -114,9 +117,6 @@ static struct usb_descriptor_header *scm_fs_descs[] = {
 	(struct usb_descriptor_header *) &fs_scm_cmd_out_desc,
 	NULL,
 };
-
-
-
 
 /**
  * High speed descriptors
@@ -142,6 +142,7 @@ hs_scm_cmd_out_desc = {
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
+
 static struct usb_endpoint_descriptor hs_scm_in_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
@@ -149,6 +150,7 @@ static struct usb_endpoint_descriptor hs_scm_in_desc = {
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
+
 static struct usb_endpoint_descriptor hs_scm_out_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
@@ -156,17 +158,15 @@ static struct usb_endpoint_descriptor hs_scm_out_desc = {
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
+
 static struct usb_descriptor_header *scm_hs_descs[] = {
 	(struct usb_descriptor_header *) &scm_intf,
 	(struct usb_descriptor_header *) &hs_scm_out_desc,
 	(struct usb_descriptor_header *) &hs_scm_in_desc,
 	(struct usb_descriptor_header *) &hs_scm_cmd_out_desc,
 	(struct usb_descriptor_header *) &hs_scm_cmd_in_desc,
-
 	NULL,
 };
-
-
 
 /**
  * Superspeed descriptors
@@ -226,6 +226,7 @@ static struct usb_endpoint_descriptor ss_scm_out_desc = {
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(1024),
 };
+
 static struct usb_ss_ep_comp_descriptor ss_scm_out_comp_desc = {
 	.bLength =              USB_DT_SS_EP_COMP_SIZE,
 	.bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
@@ -269,7 +270,6 @@ static struct usb_gadget_strings *scm_strings[] = {
 	NULL,
 };
 
-
 /**
  * usb allocation
  */
@@ -277,7 +277,6 @@ static inline struct f_scm *func_to_scm(struct usb_function *f)
 {
 	return container_of(f, struct f_scm, function);
 }
-
 
 /* Binds this driver to a device */
 static int scm_bind(struct usb_configuration *c, struct usb_function *f)
@@ -299,7 +298,6 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	id = usb_string_id(cdev);
 	if (id < 0)
 		return -ENODEV;
-
 
 	scm_string_defs[0].id = id;
 	scm_intf.iInterface = id;
@@ -396,6 +394,7 @@ static int enable_endpoint(struct usb_composite_dev *cdev, struct f_scm *scm,
 
 	return 0;
 }
+
 /**
  * @todo add error out that disables endpoint when fail
  * @todo check if its better two use 2 functions for the complete part
@@ -441,8 +440,6 @@ static void disable_scm(struct f_scm *scm)
 	}
 }
 
-
-
 /**
  * Sets the interface alt setting
  * As we have no alt settings yet value will be zero.
@@ -467,7 +464,6 @@ static void scm_disable(struct usb_function *f)
 
 	disable_scm(sock);
 }
-
 
 static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 {
@@ -499,7 +495,6 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
  *
  * usb instance allocation handling
  */
-
 static inline struct f_scm_opts *to_f_scm_opts(struct config_item *item)
 {
 	return container_of(to_config_group(item), struct f_scm_opts,
@@ -517,18 +512,15 @@ static struct configfs_item_operations scm_item_ops = {
 	.release                = scm_attr_release,
 };
 
-
 static struct configfs_attribute *scm_attrs[] = {
 	NULL,
 };
-
 
 static struct config_item_type scm_func_type = {
 		.ct_item_ops    = &scm_item_ops,
 		.ct_attrs       = scm_attrs,
 		.ct_owner       = THIS_MODULE,
 };
-
 
 static void scm_free_instance(struct usb_function_instance *fi)
 {
@@ -537,7 +529,6 @@ static void scm_free_instance(struct usb_function_instance *fi)
 	scm_opts = container_of(fi, struct f_scm_opts, func_inst);
 	kfree(scm_opts);
 }
-
 
 static struct usb_function_instance *scm_alloc_inst(void)
 {
@@ -556,7 +547,6 @@ static struct usb_function_instance *scm_alloc_inst(void)
 
 	return &scm_opts->func_inst;
 }
-
 
 DECLARE_USB_FUNCTION(scm, scm_alloc_inst, scm_alloc);
 
