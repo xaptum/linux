@@ -250,18 +250,18 @@ static struct usb_descriptor_header *ss_scm_descs[] = {
 /**
  * USB string definitions
  */ 
-static struct usb_string strings_scm[] = {
+static struct usb_string scm_string_defs[] = {
         [0].s = "scm interface",
         {  }                    /* end of list */
 };
 
-static struct usb_gadget_strings stringtab_scm = {
+static struct usb_gadget_strings scm_string_table = {
         .language       = 0x0409,       /* en-us */
-        .strings        = strings_scm,
+        .strings        = scm_string_defs,
 };
 
 static struct usb_gadget_strings *scm_strings[] = {
-        &stringtab_scm,
+        &scm_string_table,
         NULL,
 };
 
@@ -297,7 +297,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 		return -ENODEV;
 
 
-	strings_scm[0].id = id;
+	scm_string_defs[0].id = id;
 	scm_intf.iInterface = id;
 
 	/* Set up the bulk and command endpoints */
