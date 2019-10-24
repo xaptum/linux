@@ -395,8 +395,6 @@ static int enable_scm( struct usb_composite_dev *cdev, struct f_scm *scm )
 {
 	int result = 0;
 
-	printk(KERN_INFO "enable_scm enter");
-
 	// Enable the endpoints
 	result = enable_endpoint( cdev, scm, scm->bulk_in_ep );
 	if(result)
@@ -482,7 +480,6 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
         scm->function.strings = scm_strings;
 
         scm->function.free_func = scm_free_func;
-	printk(KERN_INFO "scm_alloc exit");
 
         return &scm->function;
 
