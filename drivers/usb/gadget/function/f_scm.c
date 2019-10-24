@@ -214,7 +214,7 @@ static struct usb_ss_ep_comp_descriptor f_scm_ss_ctrl_comp_desc = {
 	/* the following 3 values can be tweaked if necessary */
 	/* .bMaxBurst =		0, */
 	/* .bmAttributes =	0, */
-	.wBytesPerInterval =	cpu_to_le16(16),
+	.wBytesPerInterval =	cpu_to_le16(MAX_INT_PACKET_SIZE),
 };
 
 static struct usb_endpoint_descriptor f_scm_ss_bulk_sink_desc = {
