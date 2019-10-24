@@ -250,7 +250,7 @@ static struct usb_descriptor_header *scm_ss_descs[] = {
  * USB string definitions
  */
 static struct usb_string scm_string_defs[] = {
-	[0].s = "scm interface",
+	[0].s = "Socket Control Model (SCM)",
 	{  }                    /* end of list */
 };
 
