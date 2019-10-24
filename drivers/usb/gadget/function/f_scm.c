@@ -384,7 +384,7 @@ static int enable_endpoint(struct usb_composite_dev *cdev, struct f_scm *scm,
 		goto out;
 
 	result = usb_ep_enable(ep);
-	if (result<0)
+	if (result < 0)
 		goto out;
 	ep->driver_data = scm;
 	result = 0;
@@ -424,12 +424,24 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 	return result;
 }
 
+static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
+{
+	int value;
+
+	value = usb_ep_disable(ep);
+	if (value < 0)
+		DBG(cdev, "disable %s --> %d\n", ep->name, value);
+}
+
 static void disable_scm(struct f_scm *scm)
 {
-	usb_ep_disable(scm->bulk_in);
-	usb_ep_disable(scm->bulk_out);
-	usb_ep_disable(scm->cmd_in);
-	usb_ep_disable(scm->cmd_out);
+	struct usb_composite_dev *cdev;
+
+	cdev = scm->function.config->cdev;
+	disable_ep(cdev, scm->bulk_in);
+	disable_ep(cdev, scm->bulk_out);
+	disable_ep(cdev, scm->cmd_in);
+	disable_ep(cdev, scm->cmd_out);
 }
 
 /**
