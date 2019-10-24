@@ -426,12 +426,10 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 
 static void disable_scm(struct f_scm *scm)
 {
-	if (scm) {
-		usb_ep_disable(scm->bulk_in);
-		usb_ep_disable(scm->bulk_out);
-		usb_ep_disable(scm->cmd_in);
-		usb_ep_disable(scm->cmd_out);
-	}
+	usb_ep_disable(scm->bulk_in);
+	usb_ep_disable(scm->bulk_out);
+	usb_ep_disable(scm->cmd_in);
+	usb_ep_disable(scm->cmd_out);
 }
 
 /**
