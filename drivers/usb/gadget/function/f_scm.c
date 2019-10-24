@@ -19,8 +19,9 @@
  * communcate socket management data (open, connect, ect).
  */
 
-#define MAX_INT_PACKET_SIZE 64
-#define SCM_INTERFACE_SUBCLASS 0xab
+#define MAX_INT_PACKET_SIZE 	64
+#define SCM_INTERFACE_SUBCLASS	0xab
+#define SCM_STATUS_INTERVAL_MS	32
 
 /**
  * Usb function structure definition
@@ -70,7 +71,7 @@ f_scm_fs_ctrl_sink_desc = {
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval	 = 32,
+	.bInterval	 = SCM_STATUS_INTERVAL_MS,
 };
 
 static struct usb_endpoint_descriptor
@@ -81,7 +82,7 @@ f_scm_fs_ctrl_source_desc  = {
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval 	 = 32,
+	.bInterval 	 = SCM_STATUS_INTERVAL_MS,
 };
 
 static struct usb_endpoint_descriptor
@@ -92,7 +93,7 @@ f_scm_hs_ctrl_sink_desc = {
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 static struct usb_endpoint_descriptor
 f_scm_hs_ctrl_source_desc = {
@@ -102,7 +103,7 @@ f_scm_hs_ctrl_source_desc = {
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 
 
@@ -114,7 +115,7 @@ f_scm_ss_ctrl_sink_desc = {
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval	 = USB_MS_TO_HS_INTERVAL(32),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 static struct usb_endpoint_descriptor
 f_scm_ss_ctrl_source_desc = {
@@ -124,7 +125,7 @@ f_scm_ss_ctrl_source_desc = {
 	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes    = USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval 	 = USB_MS_TO_HS_INTERVAL(32),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 
 /**
