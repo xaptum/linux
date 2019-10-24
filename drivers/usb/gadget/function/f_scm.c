@@ -31,10 +31,10 @@ struct f_scm {
 
 	struct usb_composite_dev *cdev;
 
-	struct usb_ep *bulk_in_ep;
-	struct usb_ep *bulk_out_ep;
-	struct usb_ep *cmd_out_ep;
-	struct usb_ep *cmd_in_ep;
+	struct usb_ep *bulk_in;
+	struct usb_ep *bulk_out;
+	struct usb_ep *cmd_out;
+	struct usb_ep *cmd_in;
 	struct usb_ep *ep0;
 };
 
@@ -299,33 +299,33 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	scm_intf.iInterface = id;
 
 	/* Set up the bulk and command endpoints */
-	scm->bulk_in_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc);
-	if (!scm->bulk_in_ep) {
+	scm->bulk_in = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc);
+	if (!scm->bulk_in) {
 		printk(KERN_ERR "%s: can't autoconfigure bulk source on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 
 	}
 
-	scm->bulk_out_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc);
-	if (!scm->bulk_out_ep) {
+	scm->bulk_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc);
+	if (!scm->bulk_out) {
 		printk(KERN_ERR "%s: can't autoconfigure bulk sink on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 
 	}
 
-	scm->cmd_out_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_ctrl_in_desc);
-	if (!scm->cmd_out_ep) {
+	scm->cmd_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_ctrl_in_desc);
+	if (!scm->cmd_out) {
 		printk(KERN_ERR 
 			"%s: can't autoconfigure control source on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 	}
 
-	scm->cmd_in_ep = usb_ep_autoconfig(cdev->gadget, 
+	scm->cmd_in = usb_ep_autoconfig(cdev->gadget, 
 		&fs_scm_ctrl_out_desc);
-	if (!scm->cmd_in_ep) {
+	if (!scm->cmd_in) {
 		printk(KERN_ERR "%s: can't autoconfigure control sink on %s\n",
 		f->name, cdev->gadget->name);
 		return -ENODEV;
@@ -399,24 +399,24 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 	int result = 0;
 
 	// Enable the endpoints
-	result = enable_endpoint(cdev, scm, scm->bulk_in_ep);
+	result = enable_endpoint(cdev, scm, scm->bulk_in);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for bulk_in_ep failed ret=%d",
+		printk(KERN_ERR "enable_endpoint for bulk_in failed ret=%d",
 			result);
 
-	result = enable_endpoint(cdev, scm, scm->bulk_out_ep);	
+	result = enable_endpoint(cdev, scm, scm->bulk_out);	
 	if (result)
-		printk(KERN_ERR "enable_endpoint for bulk_out_ep failed ret=%d",
+		printk(KERN_ERR "enable_endpoint for bulk_out failed ret=%d",
 			result);
 	
-	result = enable_endpoint(cdev, scm, scm->cmd_in_ep);
+	result = enable_endpoint(cdev, scm, scm->cmd_in);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for cmd_in_ep failed ret=%d",
+		printk(KERN_ERR "enable_endpoint for cmd_in failed ret=%d",
 			result);
 
-	result = enable_endpoint(cdev, scm, scm->cmd_out_ep);	
+	result = enable_endpoint(cdev, scm, scm->cmd_out);	
 	if (result)
-		printk(KERN_ERR "enable_endpoint for cmd_out_ep failed ret=%d",
+		printk(KERN_ERR "enable_endpoint for cmd_out failed ret=%d",
 			result);
 
 	// @todo check for better way to pass these structs
@@ -428,10 +428,10 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 static void disable_scm(struct f_scm *scm)
 {
 	if (scm) {
-		usb_ep_disable(scm->bulk_in_ep);
-		usb_ep_disable(scm->bulk_out_ep);
-		usb_ep_disable(scm->cmd_in_ep);
-		usb_ep_disable(scm->cmd_out_ep);
+		usb_ep_disable(scm->bulk_in);
+		usb_ep_disable(scm->bulk_out);
+		usb_ep_disable(scm->cmd_in);
+		usb_ep_disable(scm->cmd_out);
 	}
 }
 
