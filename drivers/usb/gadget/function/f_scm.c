@@ -22,9 +22,9 @@
  * communcate socket management data (open, connect, ect).
  */
 
-#define MAX_INT_PACKET_SIZE 	64
-#define SCM_INTERFACE_SUBCLASS	0xab
-#define SCM_STATUS_INTERVAL_MS	32
+#define MAX_INT_PACKET_SIZE    64
+#define SCM_INTERFACE_SUBCLASS 0xab
+#define SCM_STATUS_INTERVAL_MS 32
 
 /**
  * Usb function structure definition
@@ -55,14 +55,14 @@ static struct usb_interface_descriptor scm_intf = {
 
 /***************************************************************************
  * USB DESCRIPTOR DEFINITIONS
- * There are 4 descriptors: 
+ * There are 4 descriptors:
  *   Bulk In / Out
  *   Cmd In / Out
  * There are 3 speeds:
  *   Full Speed
  *   High Speed
  *   Super Speed
- * Every combination of the above needs its own descriptor. 
+ * Every combination of the above needs its own descriptor.
  ***************************************************************************/
 
 /**
@@ -178,7 +178,7 @@ ss_scm_ctrl_in_desc = {
 	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval =.       USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
+	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 static struct usb_endpoint_descriptor
 ss_scm_ctrl_out_desc = {
@@ -191,7 +191,7 @@ ss_scm_ctrl_out_desc = {
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
 static struct usb_ss_ep_comp_descriptor ss_scm_ctrl_comp_desc = {
-	.bLength =		sizeof ss_scm_ctrl_comp_desc,
+	.bLength =		sizeof(ss_scm_ctrl_comp_desc),
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
 	/* the following 3 values can be tweaked if necessary */
@@ -250,7 +250,7 @@ static struct usb_descriptor_header *scm_ss_descs[] = {
 
 /**
  * USB string definitions
- */ 
+ */
 static struct usb_string scm_string_defs[] = {
 	[0].s = "scm interface",
 	{  }                    /* end of list */
@@ -287,14 +287,14 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	cdev = c->cdev;
 	scm = func_to_scm(f);
 
-	id = usb_interface_id(c,f);
+	id = usb_interface_id(c, f);
 	if (id < 0)
 		return -ENODEV;
 
 	scm_intf.bInterfaceNumber = id;
 
 	id = usb_string_id(cdev);
-	if (id < 0) 
+	if (id < 0)
 		return -ENODEV;
 
 
@@ -304,7 +304,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	/* Set up the bulk and command endpoints */
 	scm->bulk_in = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc);
 	if (!scm->bulk_in) {
-		printk(KERN_ERR "%s: can't autoconfigure bulk source on %s\n",
+		ERROR(cdev, "%s: can't autoconfigure bulk source on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 
@@ -312,7 +312,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 
 	scm->bulk_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc);
 	if (!scm->bulk_out) {
-		printk(KERN_ERR "%s: can't autoconfigure bulk sink on %s\n",
+		ERROR(cdev, "%s: can't autoconfigure bulk sink on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 
@@ -320,16 +320,16 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 
 	scm->cmd_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_ctrl_in_desc);
 	if (!scm->cmd_out) {
-		printk(KERN_ERR 
+		ERROR(cdev,
 			"%s: can't autoconfigure control source on %s\n",
 			f->name, cdev->gadget->name);
 		return -ENODEV;
 	}
 
-	scm->cmd_in = usb_ep_autoconfig(cdev->gadget, 
+	scm->cmd_in = usb_ep_autoconfig(cdev->gadget,
 		&fs_scm_ctrl_out_desc);
 	if (!scm->cmd_in) {
-		printk(KERN_ERR "%s: can't autoconfigure control sink on %s\n",
+		ERROR(cdev, "%s: can't autoconfigure control sink on %s\n",
 		f->name, cdev->gadget->name);
 		return -ENODEV;
 	}
@@ -343,7 +343,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 		fs_scm_ctrl_out_desc.bEndpointAddress;
 	hs_scm_ctrl_in_desc.bEndpointAddress =
 		fs_scm_ctrl_in_desc.bEndpointAddress;
-	
+
 	/* support super speed hardware */
 	ss_scm_out_desc.bEndpointAddress =
 		fs_scm_out_desc.bEndpointAddress;
@@ -357,7 +357,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	/* Copy the descriptors to the function */
 	ret = usb_assign_descriptors(f, scm_fs_descs, scm_hs_descs,
 			scm_ss_descs, NULL);
-	if (ret<0)
+	if (ret < 0)
 		return -ENOMEM;
 
 	DBG(cdev, "SCM bind complete at %s speed\n",
@@ -369,7 +369,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 static void scm_free_func(struct usb_function *f)
 {
 	struct f_scm_opts *opts;
-	
+
 	opts = container_of(f->fi, struct f_scm_opts, func_inst);
 
 	mutex_lock(&opts->lock);
@@ -380,7 +380,7 @@ static void scm_free_func(struct usb_function *f)
 	kfree(func_to_scm(f));
 }
 
-static int enable_endpoint(struct usb_composite_dev *cdev, struct f_scm *scm, 
+static int enable_endpoint(struct usb_composite_dev *cdev, struct f_scm *scm,
 	struct usb_ep *ep)
 {
 	int result;
@@ -404,22 +404,22 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 	// Enable the endpoints
 	result = enable_endpoint(cdev, scm, scm->bulk_in);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for bulk_in failed ret=%d",
+		ERROR(cdev, "enable_endpoint for bulk_in failed ret=%d",
 			result);
 
-	result = enable_endpoint(cdev, scm, scm->bulk_out);	
+	result = enable_endpoint(cdev, scm, scm->bulk_out);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for bulk_out failed ret=%d",
+		ERROR(cdev, "enable_endpoint for bulk_out failed ret=%d",
 			result);
-	
+
 	result = enable_endpoint(cdev, scm, scm->cmd_in);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for cmd_in failed ret=%d",
+		ERROR(cdev, "enable_endpoint for cmd_in failed ret=%d",
 			result);
 
-	result = enable_endpoint(cdev, scm, scm->cmd_out);	
+	result = enable_endpoint(cdev, scm, scm->cmd_out);
 	if (result)
-		printk(KERN_ERR "enable_endpoint for cmd_out failed ret=%d",
+		ERROR(cdev, "enable_endpoint for cmd_out failed ret=%d",
 			result);
 
 	// @todo check for better way to pass these structs
@@ -445,7 +445,8 @@ static void disable_scm(struct f_scm *scm)
  * As we have no alt settings yet value will be zero.
  * But interface should be disabled / enabled again
  */
-static int scm_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
+static int scm_set_alt(struct usb_function *f, unsigned int intf,
+	unsigned int alt)
 {
 	int ret;
 
@@ -505,6 +506,7 @@ static inline struct f_scm_opts *to_f_scm_opts(struct config_item *item)
 static void scm_attr_release(struct config_item *item)
 {
 	struct f_scm_opts *scm_opts = to_f_scm_opts(item);
+
 	usb_put_function_instance(&scm_opts->func_inst);
 }
 
@@ -546,7 +548,7 @@ static struct usb_function_instance *scm_alloc_inst(void)
 
 	scm_opts->func_inst.free_func_inst = scm_free_instance;
 
-	config_group_init_type_name(&scm_opts->func_inst.group, "", 
+	config_group_init_type_name(&scm_opts->func_inst.group, "",
 		&scm_func_type);
 
 	return &scm_opts->func_inst;
