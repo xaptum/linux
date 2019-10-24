@@ -32,8 +32,6 @@
 struct f_scm {
 	struct usb_function function;
 
-	struct usb_composite_dev *cdev;
-
 	struct usb_ep *bulk_in;
 	struct usb_ep *bulk_out;
 	struct usb_ep *cmd_out;
@@ -422,9 +420,6 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 	if (result)
 		ERROR(cdev, "enable_endpoint for cmd_out failed ret=%d",
 			result);
-
-	// @todo check for better way to pass these structs
-	scm->cdev = cdev;
 
 	return result;
 }
