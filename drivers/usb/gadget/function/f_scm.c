@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * f_scm.c -- USB Socket Control Module (SCM) function driver
+ * f_scm.c -- USB Socket Control Model (SCM) function driver
  *
  * Copyright (C) 2018-2019 Xaptum, Inc.
  */
@@ -12,9 +12,12 @@
 #include "u_scm.h"
 
 /*
- * This function is a "Socket Control Module" (SCM) link. The purpose of
- * SCM is to allow a device to manage and communicate over socekts on its
- * host. SCMs data transfer model uses bulk endpoints (short packet terminated)
+ * The Socket Control Model is protocol for a USB device to manage and use
+ * Berkeley/POSIX-style sockets on the host.  It allows the device to
+ * communicate with remote servers using the network connection of the host.
+ * Currently supported protocols include TCP/IPv4 and TCP/IPv6.
+ *
+ * The SCM data transfer model uses bulk endpoints (short packet terminated)
  * to send and recieve data from the hosts sockets and interrupt endpoints to
  * communcate socket management data (open, connect, ect).
  */
