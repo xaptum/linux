@@ -355,7 +355,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
  	if(ret<0)
  		return -ENOMEM;
 
-	printk(KERN_INFO "SCM bind complete at %s speed\n",
+	DBG(cdev, "SCM bind complete at %s speed\n",
 				gadget_is_superspeed(c->cdev->gadget) ? "super" :
 				gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full");
 	return 0;
