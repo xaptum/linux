@@ -63,8 +63,12 @@ static struct usb_interface_descriptor scm_intf = {
  *   Super Speed
  * Every combination of the above needs its own descriptor. 
  ***************************************************************************/
+
+/**
+ * Full speed endpoint descriptors
+ */
 static struct usb_endpoint_descriptor
-f_scm_fs_ctrl_sink_desc = {
+fs_scm_ctrl_in_desc = {
 	.bLength         = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
@@ -75,7 +79,7 @@ f_scm_fs_ctrl_sink_desc = {
 };
 
 static struct usb_endpoint_descriptor
-f_scm_fs_ctrl_source_desc  = {
+fs_scm_ctrl_out_desc  = {
 	.bLength         = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
@@ -84,54 +88,15 @@ f_scm_fs_ctrl_source_desc  = {
 	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval 	 = SCM_STATUS_INTERVAL_MS,
 };
+static struct usb_endpoint_descriptor fs_scm_in_desc = {
+	.bLength =              USB_DT_ENDPOINT_SIZE,
+        .bDescriptorType =      USB_DT_ENDPOINT,
 
-static struct usb_endpoint_descriptor
-f_scm_hs_ctrl_sink_desc = {
-	.bLength         = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType = USB_DT_ENDPOINT,
+        .bEndpointAddress =     USB_DIR_OUT,
+        .bmAttributes =         USB_ENDPOINT_XFER_BULK,
 
-	.bEndpointAddress = USB_DIR_OUT,
-	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
-static struct usb_endpoint_descriptor
-f_scm_hs_ctrl_source_desc = {
-	.bLength         = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType = USB_DT_ENDPOINT,
-
-	.bEndpointAddress = USB_DIR_IN,
-	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
-};
-
-
-static struct usb_endpoint_descriptor
-f_scm_ss_ctrl_sink_desc = {
-	.bLength         = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType = USB_DT_ENDPOINT,
-
-	.bEndpointAddress = USB_DIR_OUT,
-	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
-};
-static struct usb_endpoint_descriptor
-f_scm_ss_ctrl_source_desc = {
-	.bLength         = USB_DT_ENDPOINT_SIZE,
-	.bDescriptorType = USB_DT_ENDPOINT,
-
-	.bEndpointAddress = USB_DIR_IN,
-	.bmAttributes    = USB_ENDPOINT_XFER_INT,
-	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
-};
-
-/**
- * Full speed endpoint descriptors
- */
-static struct usb_endpoint_descriptor f_scm_fs_bulk_source_desc =  {
+static struct usb_endpoint_descriptor fs_scm_out_desc =  {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -140,75 +105,92 @@ static struct usb_endpoint_descriptor f_scm_fs_bulk_source_desc =  {
 
 
 };
-
-static struct usb_endpoint_descriptor f_scm_fs_bulk_sink_desc = {
-	.bLength =              USB_DT_ENDPOINT_SIZE,
-        .bDescriptorType =      USB_DT_ENDPOINT,
-
-        .bEndpointAddress =     USB_DIR_OUT,
-        .bmAttributes =         USB_ENDPOINT_XFER_BULK,
-
-};
-
 static struct usb_descriptor_header *fs_scm_descs[] = {
  	(struct usb_descriptor_header *) &scm_intf,
-        (struct usb_descriptor_header *) &f_scm_fs_bulk_sink_desc,
-        (struct usb_descriptor_header *) &f_scm_fs_bulk_source_desc,
-        (struct usb_descriptor_header *) &f_scm_fs_ctrl_sink_desc,
-        (struct usb_descriptor_header *) &f_scm_fs_ctrl_source_desc,
+        (struct usb_descriptor_header *) &fs_scm_in_desc,
+        (struct usb_descriptor_header *) &fs_scm_out_desc,
+        (struct usb_descriptor_header *) &fs_scm_ctrl_in_desc,
+        (struct usb_descriptor_header *) &fs_scm_ctrl_out_desc,
         NULL,
 };
+
+
+
 
 /**
  * High speed descriptors
  */
-static struct usb_endpoint_descriptor f_scm_hs_bulk_source_desc = {
+static struct usb_endpoint_descriptor
+hs_scm_ctrl_in_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
+};
+static struct usb_endpoint_descriptor
+hs_scm_ctrl_out_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
+
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
+};
+static struct usb_endpoint_descriptor hs_scm_in_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
         .bmAttributes =         USB_ENDPOINT_XFER_BULK,
         .wMaxPacketSize =       cpu_to_le16(512),
 };
-
-static struct usb_endpoint_descriptor f_scm_hs_bulk_sink_desc = {
+static struct usb_endpoint_descriptor hs_scm_out_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
         .bmAttributes =         USB_ENDPOINT_XFER_BULK,
         .wMaxPacketSize =       cpu_to_le16(512),
 };
-
 static struct usb_descriptor_header *hs_scm_descs[] = {
         (struct usb_descriptor_header *) &scm_intf,
-        (struct usb_descriptor_header *) &f_scm_hs_bulk_source_desc,
-        (struct usb_descriptor_header *) &f_scm_hs_bulk_sink_desc,
-        (struct usb_descriptor_header *) &f_scm_hs_ctrl_source_desc,
-        (struct usb_descriptor_header *) &f_scm_hs_ctrl_sink_desc,
+        (struct usb_descriptor_header *) &hs_scm_out_desc,
+        (struct usb_descriptor_header *) &hs_scm_in_desc,
+        (struct usb_descriptor_header *) &hs_scm_ctrl_out_desc,
+        (struct usb_descriptor_header *) &hs_scm_ctrl_in_desc,
 
         NULL,
 };
 
+
+
 /**
  * Superspeed descriptors
  */
-static struct usb_endpoint_descriptor f_scm_ss_bulk_source_desc = {
-        .bLength =              USB_DT_ENDPOINT_SIZE,
-        .bDescriptorType =      USB_DT_ENDPOINT,
+static struct usb_endpoint_descriptor
+ss_scm_ctrl_in_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
 
-        .bmAttributes =         USB_ENDPOINT_XFER_BULK,
-        .wMaxPacketSize =       cpu_to_le16(1024),
+	.bEndpointAddress = USB_DIR_OUT,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
+	.bInterval	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
+static struct usb_endpoint_descriptor
+ss_scm_ctrl_out_desc = {
+	.bLength         = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType = USB_DT_ENDPOINT,
 
-static struct usb_ss_ep_comp_descriptor f_scm_ss_bulk_source_comp_desc = {
-        .bLength =              USB_DT_SS_EP_COMP_SIZE,
-        .bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
-        .bMaxBurst =            0,
-        .bmAttributes =         0,
-        .wBytesPerInterval =    0,
+	.bEndpointAddress = USB_DIR_IN,
+	.bmAttributes    = USB_ENDPOINT_XFER_INT,
+	.wMaxPacketSize  = cpu_to_le16(MAX_INT_PACKET_SIZE),
+	.bInterval 	 = USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
 };
-
-static struct usb_ss_ep_comp_descriptor f_scm_ss_ctrl_comp_desc = {
-	.bLength =		sizeof f_scm_ss_ctrl_comp_desc,
+static struct usb_ss_ep_comp_descriptor ss_scm_ctrl_comp_desc = {
+	.bLength =		sizeof ss_scm_ctrl_comp_desc,
 	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
 
 	/* the following 3 values can be tweaked if necessary */
@@ -217,7 +199,7 @@ static struct usb_ss_ep_comp_descriptor f_scm_ss_ctrl_comp_desc = {
 	.wBytesPerInterval =	cpu_to_le16(MAX_INT_PACKET_SIZE),
 };
 
-static struct usb_endpoint_descriptor f_scm_ss_bulk_sink_desc = {
+static struct usb_endpoint_descriptor ss_scm_in_desc = {
         .bLength =              USB_DT_ENDPOINT_SIZE,
         .bDescriptorType =      USB_DT_ENDPOINT,
 
@@ -225,7 +207,22 @@ static struct usb_endpoint_descriptor f_scm_ss_bulk_sink_desc = {
         .wMaxPacketSize =       cpu_to_le16(1024),
 };
 
-static struct usb_ss_ep_comp_descriptor f_scm_ss_bulk_sink_comp_desc = {
+static struct usb_ss_ep_comp_descriptor ss_scm_in_comp_desc = {
+        .bLength =              USB_DT_SS_EP_COMP_SIZE,
+        .bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
+        .bMaxBurst =            0,
+        .bmAttributes =         0,
+        .wBytesPerInterval =    0,
+};
+
+static struct usb_endpoint_descriptor ss_scm_out_desc = {
+        .bLength =              USB_DT_ENDPOINT_SIZE,
+        .bDescriptorType =      USB_DT_ENDPOINT,
+
+        .bmAttributes =         USB_ENDPOINT_XFER_BULK,
+        .wMaxPacketSize =       cpu_to_le16(1024),
+};
+static struct usb_ss_ep_comp_descriptor ss_scm_out_comp_desc = {
         .bLength =              USB_DT_SS_EP_COMP_SIZE,
         .bDescriptorType =      USB_DT_SS_ENDPOINT_COMP,
         .bMaxBurst =            0,
@@ -236,17 +233,17 @@ static struct usb_ss_ep_comp_descriptor f_scm_ss_bulk_sink_comp_desc = {
 static struct usb_descriptor_header *ss_scm_descs[] = {
         (struct usb_descriptor_header *) &scm_intf,
 
-        (struct usb_descriptor_header *) &f_scm_ss_bulk_source_desc,
-        (struct usb_descriptor_header *) &f_scm_ss_bulk_source_comp_desc,
+        (struct usb_descriptor_header *) &ss_scm_out_desc,
+        (struct usb_descriptor_header *) &ss_scm_out_comp_desc,
 
-        (struct usb_descriptor_header *) &f_scm_ss_bulk_sink_desc,
-        (struct usb_descriptor_header *) &f_scm_ss_bulk_sink_comp_desc,
+        (struct usb_descriptor_header *) &ss_scm_in_desc,
+        (struct usb_descriptor_header *) &ss_scm_in_comp_desc,
 
-        (struct usb_descriptor_header *) &f_scm_ss_ctrl_sink_desc,
-        (struct usb_descriptor_header *) &f_scm_ss_ctrl_comp_desc,
+        (struct usb_descriptor_header *) &ss_scm_ctrl_in_desc,
+        (struct usb_descriptor_header *) &ss_scm_ctrl_comp_desc,
 
-        (struct usb_descriptor_header *) &f_scm_ss_ctrl_source_desc,
-        (struct usb_descriptor_header *) &f_scm_ss_ctrl_comp_desc,
+        (struct usb_descriptor_header *) &ss_scm_ctrl_out_desc,
+        (struct usb_descriptor_header *) &ss_scm_ctrl_comp_desc,
         NULL,
 };
 
@@ -304,7 +301,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 	scm_intf.iInterface = id;
 
 	/* Set up the bulk and command endpoints */
-	scm->bulk_in_ep = usb_ep_autoconfig(cdev->gadget, &f_scm_fs_bulk_source_desc );
+	scm->bulk_in_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc );
 	if (!scm->bulk_in_ep) {
 	        printk(KERN_ERR "%s: can't autoconfigure bulk source on %s\n",
                         f->name, cdev->gadget->name);
@@ -312,7 +309,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 
 	}
 
-	scm->bulk_out_ep = usb_ep_autoconfig(cdev->gadget, &f_scm_fs_bulk_sink_desc );
+	scm->bulk_out_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc );
 	if (!scm->bulk_out_ep)
 	{
 		printk(KERN_ERR "%s: can't autoconfigure bulk sink on %s\n",
@@ -321,7 +318,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 
 	}
 
-	scm->cmd_out_ep = usb_ep_autoconfig(cdev->gadget, &f_scm_fs_ctrl_sink_desc );
+	scm->cmd_out_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_ctrl_in_desc );
 	if (!scm->cmd_out_ep)
 	{
 		printk(KERN_ERR "%s: can't autoconfigure control source on %s\n",
@@ -329,7 +326,7 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 		return -ENODEV;
 	}
 
-	scm->cmd_in_ep = usb_ep_autoconfig(cdev->gadget, &f_scm_fs_ctrl_source_desc );
+	scm->cmd_in_ep = usb_ep_autoconfig(cdev->gadget, &fs_scm_ctrl_out_desc );
 	if (!scm->cmd_in_ep)
 	{
 		printk(KERN_ERR "%s: can't autoconfigure control sink on %s\n",
@@ -338,16 +335,16 @@ static int scm_bind( struct usb_configuration *c, struct usb_function *f)
 	}
 
 	/* support high speed hardware */
-        f_scm_hs_bulk_source_desc.bEndpointAddress = f_scm_fs_bulk_source_desc.bEndpointAddress;
-        f_scm_hs_bulk_sink_desc.bEndpointAddress   = f_scm_fs_bulk_sink_desc.bEndpointAddress;
-	f_scm_hs_ctrl_source_desc.bEndpointAddress = f_scm_fs_ctrl_source_desc.bEndpointAddress;
-	f_scm_hs_ctrl_sink_desc.bEndpointAddress   = f_scm_fs_ctrl_sink_desc.bEndpointAddress;
+        hs_scm_out_desc.bEndpointAddress = fs_scm_out_desc.bEndpointAddress;
+        hs_scm_in_desc.bEndpointAddress   = fs_scm_in_desc.bEndpointAddress;
+	hs_scm_ctrl_out_desc.bEndpointAddress = fs_scm_ctrl_out_desc.bEndpointAddress;
+	hs_scm_ctrl_in_desc.bEndpointAddress   = fs_scm_ctrl_in_desc.bEndpointAddress;
 	
         /* support super speed hardware */
-        f_scm_ss_bulk_source_desc.bEndpointAddress = f_scm_fs_bulk_source_desc.bEndpointAddress;
-        f_scm_ss_bulk_sink_desc.bEndpointAddress   = f_scm_fs_bulk_sink_desc.bEndpointAddress;
-	f_scm_ss_ctrl_source_desc.bEndpointAddress = f_scm_fs_ctrl_source_desc.bEndpointAddress;
-	f_scm_ss_ctrl_sink_desc.bEndpointAddress   = f_scm_fs_ctrl_sink_desc.bEndpointAddress;
+        ss_scm_out_desc.bEndpointAddress = fs_scm_out_desc.bEndpointAddress;
+        ss_scm_in_desc.bEndpointAddress   = fs_scm_in_desc.bEndpointAddress;
+	ss_scm_ctrl_out_desc.bEndpointAddress = fs_scm_ctrl_out_desc.bEndpointAddress;
+	ss_scm_ctrl_in_desc.bEndpointAddress   = fs_scm_ctrl_in_desc.bEndpointAddress;
 
         /* Copy the descriptors to the function */
  	ret = usb_assign_descriptors(f, fs_scm_descs, hs_scm_descs,
