@@ -402,6 +402,15 @@ out:
 	return result;
 }
 
+static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
+{
+	int value;
+
+	value = usb_ep_disable(ep);
+	if (value < 0)
+		DBG(cdev, "disable %s --> %d\n", ep->name, value);
+}
+
 /**
  * @todo add error out that disables endpoint when fail
  * @todo check if its better two use 2 functions for the complete part
@@ -412,35 +421,41 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 
 	// Enable the endpoints
 	result = enable_endpoint(cdev, scm, scm->bulk_in);
-	if (result)
+	if (result) {
 		ERROR(cdev, "enable_endpoint for bulk_in failed ret=%d",
 			result);
+		goto exit;
+	}
 
 	result = enable_endpoint(cdev, scm, scm->bulk_out);
-	if (result)
+	if (result) {
 		ERROR(cdev, "enable_endpoint for bulk_out failed ret=%d",
 			result);
+		goto exit_free_bi;
+	}
 
 	result = enable_endpoint(cdev, scm, scm->cmd_in);
-	if (result)
+	if (result) {
 		ERROR(cdev, "enable_endpoint for cmd_in failed ret=%d",
 			result);
+		goto exit_free_bo;
+	}
 
 	result = enable_endpoint(cdev, scm, scm->cmd_out);
-	if (result)
+	if (result) {
 		ERROR(cdev, "enable_endpoint for cmd_out failed ret=%d",
 			result);
-
+		goto exit_free_ci;
+	}
+	goto exit;
+exit_free_ci:
+	disable_ep(cdev, scm->cmd_in);
+exit_free_bo:
+	disable_ep(cdev, scm->bulk_out);
+exit_free_bi:
+	disable_ep(cdev, scm->bulk_in);
+exit:
 	return result;
-}
-
-static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
-{
-	int value;
-
-	value = usb_ep_disable(ep);
-	if (value < 0)
-		DBG(cdev, "disable %s --> %d\n", ep->name, value);
 }
 
 static void disable_scm(struct f_scm *scm)
