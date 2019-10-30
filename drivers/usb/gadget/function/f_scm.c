@@ -411,10 +411,6 @@ static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
 		DBG(cdev, "disable %s --> %d\n", ep->name, value);
 }
 
-/**
- * @todo add error out that disables endpoint when fail
- * @todo check if its better two use 2 functions for the complete part
- */
 static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 {
 	int result = 0;
