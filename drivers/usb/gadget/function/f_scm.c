@@ -54,6 +54,8 @@ static struct usb_interface_descriptor scm_intf = {
 	.bNumEndpoints      = 4,
 	.bInterfaceClass    = USB_CLASS_VENDOR_SPEC,
 	.bInterfaceSubClass = SCM_SUBCLASS,
+	/* .bInterfaceNumber = DYNAMIC */
+	/* .iInterface = DYNAMIC */
 };
 
 /***************************************************************************
@@ -149,6 +151,7 @@ static struct usb_endpoint_descriptor hs_scm_in_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
+	.bEndpointAddress =     USB_DIR_OUT,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
@@ -157,6 +160,7 @@ static struct usb_endpoint_descriptor hs_scm_out_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
+	.bEndpointAddress =     USB_DIR_IN,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
@@ -205,6 +209,7 @@ static struct usb_endpoint_descriptor ss_scm_in_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
+	.bEndpointAddress =     USB_DIR_OUT,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(1024),
 };
@@ -219,6 +224,7 @@ static struct usb_endpoint_descriptor ss_scm_out_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
+	.bEndpointAddress =     USB_DIR_IN,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(1024),
 };
