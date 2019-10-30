@@ -22,8 +22,12 @@
  * communcate socket management data (open, connect, ect).
  */
 
-#define MAX_INT_PACKET_SIZE    64
+/*
+ * Change to your devices appropiate value and add an entry to the host drivers
+ * device table 
+ */
 #define SCM_SUBCLASS 0xab
+#define MAX_INT_PACKET_SIZE    64
 #define SCM_STATUS_INTERVAL_MS 32
 
 /**
