@@ -591,5 +591,5 @@ module_exit(f_scm_exit);
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
-MODULE_DESCRIPTION("Xaptum SCM Driver");
+MODULE_DESCRIPTION("SCM Driver");
 MODULE_VERSION("0.0.1");
