@@ -490,8 +490,8 @@ config USB_CONFIGFS_F_SCM
 	depends on USB_CONFIGFS
 	select USB_F_SCM
         help
-          This driver adds the SCM function to the Linux kernel for use
-          with Xaptum router cards
+          Adds the Socket Control Module protocol for a USB device to manage
+          and use Berkeley/POSIX-style sockets on the host.
 
 choice
 	tristate "USB Gadget precomposed configurations"
