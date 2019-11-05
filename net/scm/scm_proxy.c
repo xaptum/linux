@@ -1,6 +1,6 @@
 #include <linux/mutex.h>
 #include "scm_proxy.h"
-#include "scm.h"
+#include "xscm.h"
 
 /* For now we will just use a rotating count 0-255 */
 __u8 scm_msg_id;
