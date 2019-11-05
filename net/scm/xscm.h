@@ -1,18 +1,10 @@
-// SPDX-License-Identifier: GPL-2.0+
-/*
- * u_scm.h -- USB Socket Control Module (SCM) function driver
- *
- * Copyright (C) 2018-2019 Xaptum, Inc.
+/* SPDX-License-Identifier: GPL-2.0+ */
+/**
+ * @file scm.h
+ * @brief SCM structure definitions
  */
-#ifndef _U_SCM_H_
-#define _U_SCM_H_
-
-struct f_scm_opts {
-	struct usb_function_instance func_inst;
-	struct mutex lock;
-	int refcnt; 
-};
-
+#ifndef SCM_H
+#define SCM_H
 
 #include <linux/kernel.h>
 
@@ -83,14 +75,16 @@ struct scm_payload_connect_ip4 {
 	__be32		ip_addr;
 };
 
+union scm_payload_connect_ip_addr {
+	struct scm_payload_connect_ip6 ip6; 
+	struct scm_payload_connect_ip4 ip4;
+};
+
 struct scm_payload_connect_ip {
 	enum scm_family	family;
-	__u8		resvd;
-	__be16		port;
-	union {
-		struct scm_payload_connect_ip6 ip6; 
-		struct scm_payload_connect_ip4 ip4;
-	};
+	__u8					resvd;
+	__be16					port;
+	union scm_payload_connect_ip_addr	addr;
 };
 
 struct scm_packet {
@@ -102,5 +96,4 @@ struct scm_packet {
 		struct scm_payload_ack ack;
 	};
 };
-
-#endif 
+#endif

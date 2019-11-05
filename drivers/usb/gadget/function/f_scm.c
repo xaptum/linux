@@ -586,6 +586,15 @@ static void __exit f_scm_exit(void)
 	usb_function_unregister(&scmusb_func);
 }
 
+/* Export functions */
+
+void xaprc00x_usb_send_msg(struct scm_packet *packet, int len)
+{
+	return;
+}
+EXPORT_SYMBOL(xaprc00x_usb_send_msg);
+
+
 module_init(f_scm_init);
 module_exit(f_scm_exit);
 
