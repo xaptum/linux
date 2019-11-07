@@ -11,6 +11,8 @@
 #include <linux/usb/composite.h>
 #include <linux/xscm.h>
 #include <linux/mutex.h>
+#include <linux/net.h>
+#include <net/sock.h>
 #include "u_scm.h"
 /*
  * The Socket Control Model is protocol for a USB device to manage and use
@@ -606,17 +608,18 @@ DEFINE_MUTEX(scm_msg_id_mutex);
 /* Stubs for now */
 void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id)
 {
+	*packet = kzalloc(sizeof(struct scm_packet),GFP_KERNEL);
 	return;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_wait_ack);
 
-static void scm_proxy_init()
+static void scm_proxy_init(void)
 {
-	mutex_init(scm_msg_id_mutex);
+	mutex_init(&scm_msg_id_mutex);
 	scm_msg_id = 0;
 }
 
-static int scm_proxy_get_msg_id()
+static int scm_proxy_get_msg_id(void)
 {
 	int id;
 	mutex_lock(&scm_msg_id_mutex);
@@ -626,16 +629,16 @@ static int scm_proxy_get_msg_id()
 }
 
 static void scm_proxy_assign_ip4(struct scm_packet *packet,
-	struct sockaddr *addr, int alen)
+	struct sockaddr *addr)
 {
 	struct sockaddr_in *ip4_addr = (struct sockaddr_in*) addr;
 
-	packet->connect.ip4.ip_addr = ip4_addr->sin_addr.s_addr;
+	packet->connect.addr.ip4.ip_addr = ip4_addr->sin_addr.s_addr;
 	packet->connect.port = ip4_addr->sin_port;
 	packet->connect.family = SCM_FAM_IP;
 
-	packet->connect.payload_len = sizeof(struct scm_payload_connect_ip) -
-		sizeof(struct scm_payload_connect_ip_addr) +
+	packet->hdr.payload_len = sizeof(struct scm_payload_connect_ip) -
+		sizeof(union scm_payload_connect_ip_addr) +
 		sizeof(struct scm_payload_connect_ip4);
 }
 
@@ -644,35 +647,45 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 {
 	struct sockaddr_in6 *ip6_addr = (struct sockaddr_in6*) addr;
 
-	memcpy(packet->connect.ip6.ip_addr,
+	memcpy(packet->connect.addr.ip6.ip_addr,
 		&ip6_addr->sin6_addr, sizeof(struct in6_addr));
 	packet->connect.port = ip6_addr->sin6_port;
-	packet->connect.scope = ip6_addr->sin6_scope_id;
-	packet->connect.flow_info = ip6_addr->sin6_flowinfo;
+	packet->connect.addr.ip6.scope_id = ip6_addr->sin6_scope_id;
+	packet->connect.addr.ip6.flow_info = ip6_addr->sin6_flowinfo;
 	packet->connect.family = SCM_FAM_IP6;
 
-	packet->connect.payload_len = sizeof(struct scm_payload_connect_ip) -
-		sizeof(struct scm_payload_connect_ip_addr) +
+	packet->hdr.payload_len = sizeof(struct scm_payload_connect_ip) -
+		sizeof(union scm_payload_connect_ip_addr) +
 		sizeof(struct scm_payload_connect_ip6);
 }
-int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen)
+int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 {
 	struct scm_packet *ack;
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	int ret;
 
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
 
-	if (addr->sa_family == AF_INET &&
-		alen == sizeof(struct sockaddr_in))
+	if (addr->sa_family == AF_INET)
 		scm_proxy_assign_ip4(packet, addr);
-	else if (addr->sa_family == AF_INET6 &&
-		alen == sizeof(struct sockaddr_in6))
+	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
 
-	xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+
+	printk(KERN_INFO "Sent to USB (CONN)");
+	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+		16, 1, packet, sizeof(struct scm_packet_hdr) +
+		packet->hdr.payload_len, true);
+
 	scm_proxy_wait_ack(&ack, packet->hdr.msg_id);
-	return ack->connect;
+	ret = ack->ack.connect;
+
+	kfree(packet);
+	kfree(ack);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 
@@ -680,6 +693,7 @@ int scm_proxy_open_socket(int *local_id)
 {
 	struct scm_packet *ack;
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	int ret;
 
 	packet->hdr.opcode = SCM_OP_OPEN;
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
@@ -688,14 +702,23 @@ int scm_proxy_open_socket(int *local_id)
 	packet->open.protocol = SCM_PROTO_TCP;
 	packet->open.type = SCM_TYPE_STREAM;
 
-	xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
 
+	printk(KERN_INFO "Sent to USB (OPEN) for &local_id=%p",local_id);
+	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+		16, 1, packet, sizeof(struct scm_packet_hdr) +
+		packet->hdr.payload_len, true);
 	scm_proxy_wait_ack(&ack, packet->hdr.msg_id);
+	printk(KERN_INFO "Got ack=%p",ack);
 
-	if (ack->open == 0)
+	ret = ack->ack.open;
+	if (ret == 0)
 		*local_id = ack->hdr.sock_id;
 
-	return ack->open;
+	kfree(packet);
+	kfree(ack);
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 
@@ -708,10 +731,15 @@ void scm_proxy_close_socket(int local_id)
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
 	packet->hdr.payload_len = 0;
 
-	xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr));
+	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr));
+
+	printk(KERN_INFO "Sent to USB (CLOSE)");
+	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+		16, 1, packet, sizeof(struct scm_packet_hdr), true);
 
 	scm_proxy_wait_ack(&ack, packet->hdr.msg_id);
-
+	kfree(ack);
+	kfree(packet);
 	return;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_close_socket);
