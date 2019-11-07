@@ -4,4 +4,3 @@
 #
 
 obj-$(CONFIG_SCM) += xscm.o
-xscm-y := xscm.o scm_proxy.o

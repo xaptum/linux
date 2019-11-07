@@ -6,13 +6,16 @@
  * @author Jeroen Z
  */
 
-#include "xaprc00x_proxy.h"
-
 #include <linux/net.h>
 #include <net/sock.h>
-
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
+
+/* Extern proxy defs */
+extern void scm_proxy_close_socket(int local_id);
+extern int scm_proxy_open_socket(int *local_id);
+extern int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen);
+extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
 
 /**
  * psock local socket data
@@ -40,10 +43,6 @@ static int xaprc00x_sock_shutdown(struct socket *sock, int how )
 {
 	struct sock *sk = sock->sk;
         struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
-
-	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->psk.local_id );
-
-        xaprc00x_proxy_delete_socket( &psk->psk );
 	
 	if (!sk)
 	{
@@ -54,6 +53,10 @@ static int xaprc00x_sock_shutdown(struct socket *sock, int how )
 	{
 		sk->sk_shutdown = SHUTDOWN_MASK;
 	}
+
+	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->psk.local_id );
+
+        scm_proxy_close_socket( &psk->local_id );
 
 	release_sock(sk);
 
@@ -94,8 +97,7 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr, int
 
 	printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->psk.local_id );
 
-	res = xaprc00x_proxy_connect_socket(psk->local_id, addr, alen);
-
+	ret = scm_proxy_connect_socket(psk->local_id, addr, alen);
 	return res;
 }
 
@@ -120,16 +122,9 @@ static int xaprc00x_sock_sendmsg( struct socket *sock,
 	void *data = kmalloc( len, GFP_KERNEL );
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	printk( KERN_INFO "psock_socket: sendmsg :%d %ld\n", psk->psk.local_id, len );
-	r = copy_from_iter( data, len,  &msg->msg_iter);
-	if ( r < len )
-	{
-		printk( KERN_INFO "psock_socket: sendmsg itercpy incomplete\n" );
-	}
+	printk( KERN_INFO "scm sendmsg not supported %d\n", psk->psk.local_id );
 
-	res = xaprc00x_proxy_write_socket( &psk->psk, data , len );
-
-	return res;
+	return 0;
 }
 
 /**
@@ -138,23 +133,14 @@ static int xaprc00x_sock_sendmsg( struct socket *sock,
 static int xaprc00x_sock_recvmsg(struct socket *sock,
 				struct msghdr *msg, size_t size, int flags )
 {
-	int res, r;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 	char *buf = kmalloc( size, GFP_KERNEL );
 
-	printk( KERN_INFO "psock_socket: recvmsg %d\n", psk->psk.local_id );
-
-	res = xaprc00x_proxy_read_socket( &psk->psk, buf, size );
-	
-	r = copy_to_iter( buf, res, &msg->msg_iter );	
-	if ( r < res )
-	{
-		printk( KERN_INFO "psock_socket: iter copy incomplete\n" );
-	}
+	printk( KERN_INFO "scm recv not supported %d\n", psk->psk.local_id );
 
 	kfree( buf );
 
-	return res;
+	return 0;
 }
 
 
@@ -249,6 +235,7 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol, i
 {
 	struct sock *sk;
 	struct xaprc00x_pinfo *psk;
+	int ret;
 
 	sock->state = SS_UNCONNECTED;
 	sock->ops = &xaprc00x_ops;
@@ -260,9 +247,9 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol, i
 		return -ENOMEM;
 	}
 
-	scm_proxy_open_socket(&psc->local_id);
+	ret = scm_proxy_open_socket(&psk->local_id);
 
-	return 0;
+	return ret;
 }
 
 /**
