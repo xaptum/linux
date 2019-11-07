@@ -6,8 +6,10 @@
  * @author Jeroen Z
  */
 
+#include <linux/module.h>
 #include <linux/net.h>
 #include <net/sock.h>
+#include <linux/xscm.h>
 #define PSOCK_SK_BUFF_SIZE 512
 #define PSOCK_SK_SND_TIMEO 1000
 
@@ -54,9 +56,9 @@ static int xaprc00x_sock_shutdown(struct socket *sock, int how )
 		sk->sk_shutdown = SHUTDOWN_MASK;
 	}
 
-	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->psk.local_id );
+	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
 
-        scm_proxy_close_socket( &psk->local_id );
+        scm_proxy_close_socket( psk->local_id );
 
 	release_sock(sk);
 
@@ -92,13 +94,13 @@ static int xaprc00x_sock_release(struct socket *sock)
  */
 static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr, int alen, int flags )
 {	
-	int res = -1;
+	int ret;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->psk.local_id );
+	printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->local_id );
 
 	ret = scm_proxy_connect_socket(psk->local_id, addr, alen);
-	return res;
+	return ret;
 }
 
 /**
@@ -122,7 +124,7 @@ static int xaprc00x_sock_sendmsg( struct socket *sock,
 	void *data = kmalloc( len, GFP_KERNEL );
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	printk( KERN_INFO "scm sendmsg not supported %d\n", psk->psk.local_id );
+	printk( KERN_INFO "scm sendmsg not supported %d\n", psk->local_id );
 
 	return 0;
 }
@@ -136,7 +138,7 @@ static int xaprc00x_sock_recvmsg(struct socket *sock,
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 	char *buf = kmalloc( size, GFP_KERNEL );
 
-	printk( KERN_INFO "scm recv not supported %d\n", psk->psk.local_id );
+	printk( KERN_INFO "scm recv not supported %d\n", psk->local_id );
 
 	kfree( buf );
 
@@ -233,7 +235,7 @@ exit:
  */
 static int scm_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 {
-	struct sock *sk;
+	struct sock *sk = sock->sk;
 	struct xaprc00x_pinfo *psk;
 	int ret;
 
@@ -241,6 +243,7 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol, i
 	sock->ops = &xaprc00x_ops;
 
 	sk = scm_sock_alloc(net, sock, protocol, GFP_ATOMIC, kern);
+	psk =  (struct xaprc00x_pinfo *)sk;
 	if (!sk)
 	{
 		printk( KERN_ERR "scm_proxy: ENOMEM when creating socket\n" );
@@ -266,7 +269,7 @@ static const struct net_proto_family xaprc00x_family_ops =
  * psock socket initialization, will register the protocol and socket types with the kernel
  * So the kernel can create sockets of this type when asked for
  */
-int xaprc00x_init_sockets(void )
+static int __init xaprc00x_init_sockets(void)
 {
 	int err;
 	err = proto_register(&xaprc00x_proto, 0);
@@ -289,9 +292,11 @@ int xaprc00x_init_sockets(void )
 /**
  * Cleanup and unregister registred types 
  */
-int xaprc00x_cleanup_sockets(void)
+static void __exit xaprc00x_cleanup_sockets(void)
 {
 	proto_unregister( &xaprc00x_proto );
 	sock_unregister( xaprc00x_family_ops.family );
-	return 0;
 }
+
+subsys_initcall(xaprc00x_init_sockets);
+module_exit(xaprc00x_cleanup_sockets);
