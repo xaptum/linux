@@ -14,6 +14,8 @@
 #include <linux/net.h>
 #include <net/sock.h>
 #include "u_scm.h"
+#include "u_f.h"
+
 /*
  * The Socket Control Model is protocol for a USB device to manage and use
  * Berkeley/POSIX-style sockets on the host.  It allows the device to
@@ -31,8 +33,14 @@
  */
 #define SCM_SUBCLASS 0xab
 #define MAX_INT_PACKET_SIZE    64
-#define SCM_STATUS_INTERVAL_MS 32
+#define SCM_STATUS_INTERVAL_MS 4 //32
 
+
+/* Forward declarations */
+static void scm_in_msg_complete(struct usb_ep *ep, struct usb_request *req);
+static void scm_proxy_recv_msg(void *msg, int len);
+static void scm_proxy_init(void);
+static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
 /**
  * Usb function structure definition
  */
@@ -44,7 +52,11 @@ struct f_scm {
 	struct usb_ep *cmd_out;
 	struct usb_ep *cmd_in;
 	struct usb_ep *ep0;
+
+	struct usb_request	*req_in;
+	struct usb_request	*req_out;
 };
+struct f_scm *g_scm = NULL;
 
 /*
  * The USB interface descriptor to tell the host
@@ -81,10 +93,10 @@ fs_scm_cmd_in_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_OUT,
+	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval =        SCM_STATUS_INTERVAL_MS,
+	.bInterval =        10,
 };
 
 static struct usb_endpoint_descriptor
@@ -92,17 +104,17 @@ fs_scm_cmd_out_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_IN,
+	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
-	.bInterval =        SCM_STATUS_INTERVAL_MS,
+	.bInterval =        10,
 };
 
 static struct usb_endpoint_descriptor fs_scm_in_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_OUT,
+	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes =     USB_ENDPOINT_XFER_BULK,
 
 };
@@ -111,7 +123,7 @@ static struct usb_endpoint_descriptor fs_scm_out_desc =  {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_IN,
+	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes =     USB_ENDPOINT_XFER_BULK,
 
 };
@@ -133,7 +145,7 @@ hs_scm_cmd_in_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_OUT,
+	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
@@ -144,7 +156,7 @@ hs_scm_cmd_out_desc = {
 	.bLength =          USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =  USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_IN,
+	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
@@ -154,7 +166,7 @@ static struct usb_endpoint_descriptor hs_scm_in_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
-	.bEndpointAddress =     USB_DIR_OUT,
+	.bEndpointAddress =     USB_DIR_IN,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
@@ -163,7 +175,7 @@ static struct usb_endpoint_descriptor hs_scm_out_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
-	.bEndpointAddress =     USB_DIR_IN,
+	.bEndpointAddress =     USB_DIR_OUT,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(512),
 };
@@ -185,7 +197,7 @@ ss_scm_cmd_in_desc = {
 	.bLength =         USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_OUT,
+	.bEndpointAddress = USB_DIR_IN,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
@@ -196,7 +208,7 @@ ss_scm_cmd_out_desc = {
 	.bLength =         USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType = USB_DT_ENDPOINT,
 
-	.bEndpointAddress = USB_DIR_IN,
+	.bEndpointAddress = USB_DIR_OUT,
 	.bmAttributes =     USB_ENDPOINT_XFER_INT,
 	.wMaxPacketSize =   cpu_to_le16(MAX_INT_PACKET_SIZE),
 	.bInterval =        USB_MS_TO_HS_INTERVAL(SCM_STATUS_INTERVAL_MS),
@@ -212,7 +224,7 @@ static struct usb_endpoint_descriptor ss_scm_in_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
-	.bEndpointAddress =     USB_DIR_OUT,
+	.bEndpointAddress =     USB_DIR_IN,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(1024),
 };
@@ -227,7 +239,7 @@ static struct usb_endpoint_descriptor ss_scm_out_desc = {
 	.bLength =              USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType =      USB_DT_ENDPOINT,
 
-	.bEndpointAddress =     USB_DIR_IN,
+	.bEndpointAddress =     USB_DIR_OUT,
 	.bmAttributes =         USB_ENDPOINT_XFER_BULK,
 	.wMaxPacketSize =       cpu_to_le16(1024),
 };
@@ -308,7 +320,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	scm_intf.iInterface = id;
 
 	/* Set up the bulk and command endpoints */
-	scm->bulk_in = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc);
+	scm->bulk_in = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc);
 	if (!scm->bulk_in) {
 		ERROR(cdev, "%s: can't autoconfigure bulk source on %s\n",
 			f->name, cdev->gadget->name);
@@ -316,7 +328,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 
 	}
 
-	scm->bulk_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_in_desc);
+	scm->bulk_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_out_desc);
 	if (!scm->bulk_out) {
 		ERROR(cdev, "%s: can't autoconfigure bulk sink on %s\n",
 			f->name, cdev->gadget->name);
@@ -324,7 +336,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 
 	}
 
-	scm->cmd_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_cmd_in_desc);
+	scm->cmd_out = usb_ep_autoconfig(cdev->gadget, &fs_scm_cmd_out_desc);
 	if (!scm->cmd_out) {
 		ERROR(cdev,
 			"%s: can't autoconfigure control source on %s\n",
@@ -333,7 +345,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	}
 
 	scm->cmd_in = usb_ep_autoconfig(cdev->gadget,
-		&fs_scm_cmd_out_desc);
+		&fs_scm_cmd_in_desc);
 	if (!scm->cmd_in) {
 		ERROR(cdev, "%s: can't autoconfigure control sink on %s\n",
 		f->name, cdev->gadget->name);
@@ -365,6 +377,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 			scm_ss_descs, NULL);
 	if (ret)
 		goto fail;
+
 
 	DBG(cdev, "SCM bind complete at %s speed\n",
 		gadget_is_superspeed(c->cdev->gadget) ? "super" :
@@ -416,7 +429,8 @@ static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
 
 static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 {
-	int result = 0;
+	struct usb_request	*req_in = NULL;
+	int			result = 0;
 
 	// Enable the endpoints
 	result = enable_endpoint(cdev, scm, scm->bulk_in);
@@ -440,13 +454,25 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 		goto exit_free_bo;
 	}
 
+	req_in = alloc_ep_req(scm->cmd_in, MAX_INT_PACKET_SIZE);
+	if (!req_in) {
+		result = -ENOMEM;
+		goto exit_free_ci;
+	}
+	req_in->context = scm;
+	req_in->complete = scm_send_msg_complete;
+	scm->req_in = req_in;
+
 	result = enable_endpoint(cdev, scm, scm->cmd_out);
 	if (result) {
 		ERROR(cdev, "enable_endpoint for cmd_out failed ret=%d",
 			result);
-		goto exit_free_ci;
+		goto exit_free_ri;
 	}
 	goto exit;
+exit_free_ri:
+	free_ep_req(scm->cmd_in, req_in);
+	scm->req_in = NULL;
 exit_free_ci:
 	disable_ep(cdev, scm->cmd_in);
 exit_free_bo:
@@ -460,6 +486,9 @@ exit:
 static void disable_scm(struct f_scm *scm)
 {
 	struct usb_composite_dev *cdev;
+	if (scm->cmd_in && scm->req_in)
+		free_ep_req(scm->cmd_in, scm->req_in);
+	scm->req_in = NULL;
 
 	cdev = scm->function.config->cdev;
 	disable_ep(cdev, scm->bulk_in);
@@ -483,6 +512,10 @@ static int scm_set_alt(struct usb_function *f, unsigned int intf,
 
 	disable_scm(scm);
 	ret = enable_scm(cdev, scm);
+	if (ret)
+		goto exit;
+
+exit:
 	return ret;
 }
 
@@ -515,6 +548,10 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 	scm->function.strings = scm_strings;
 
 	scm->function.free_func = scm_free_func;
+	printk(KERN_INFO "scm_alloc A");
+	g_scm = scm;
+
+	scm_proxy_init();
 
 	return &scm->function;
 }
@@ -589,9 +626,39 @@ static void __exit f_scm_exit(void)
 	usb_function_unregister(&scmusb_func);
 }
 
-
 module_init(f_scm_init);
 module_exit(f_scm_exit);
+
+/* Handle USB listening and writing */
+static void scm_in_msg_complete(struct usb_ep *ep, struct usb_request *req)
+{
+	printk("scm_in_msg_complete");
+	//scm_proxy_recv_msg(req->buf, req->length);
+
+	/* Keep listening as long as we are still in an active configuration */
+	//if (g_scm && g_scm->req_in)
+		//usb_ep_queue(g_scm->cmd_out, g_scm->req_out, GFP_ATOMIC);
+}
+static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
+{
+	printk("Send msg complete req->status=%d",req->status);
+} 
+static void scm_send_msg(void *data, int len)
+{
+	struct usb_request *req = g_scm->req_in;
+	int ret;
+	if (!req) {
+		printk(KERN_INFO "scm_send_msg !req");
+		return;
+	}
+	req->buf = kmalloc(MAX_INT_PACKET_SIZE, GFP_ATOMIC);
+	memcpy(req->buf, data, len);
+	req->length = len;
+	printk(KERN_INFO "scm_send_msg: Sending message");
+	ret = usb_ep_queue(g_scm->cmd_in, g_scm->req_in, GFP_ATOMIC);
+	printk("ep queue returned %d", ret);
+}
+
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
@@ -608,10 +675,23 @@ DEFINE_MUTEX(scm_msg_id_mutex);
 /* Stubs for now */
 void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id)
 {
-	*packet = kzalloc(sizeof(struct scm_packet),GFP_KERNEL);
+	volatile int i;
+	printk(KERN_INFO "scm_proxy_wait_ack start");
+	*packet = kzalloc(sizeof(struct scm_packet),GFP_ATOMIC);
+	for(i=0;i<100000000;i++){if(i%1000000==0){printk(KERN_INFO "scm_proxy_wait_ack continue...");}}
+	printk(KERN_INFO "scm_proxy_wait_ack exit");
 	return;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_wait_ack);
+
+
+/* Copies an in msg for use in the proxy */
+static void scm_proxy_recv_msg(void *msg, int len)
+{
+	printk(KERN_INFO "USB->Proxy:");
+	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+		16, 1, msg, len, true);
+}
 
 static void scm_proxy_init(void)
 {
@@ -663,6 +743,7 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 	struct scm_packet *ack;
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
 	int ret;
+	printk(KERN_INFO "scm_proxy_connect_socket A");
 
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
@@ -671,11 +752,12 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 		scm_proxy_assign_ip4(packet, addr);
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
+	printk(KERN_INFO "scm_proxy_connect_socket B");
 
-	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+	scm_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
 
 	printk(KERN_INFO "Sent to USB (CONN)");
-	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr) +
 		packet->hdr.payload_len, true);
 
@@ -692,7 +774,7 @@ EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 int scm_proxy_open_socket(int *local_id)
 {
 	struct scm_packet *ack;
-	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_ATOMIC);
 	int ret;
 
 	packet->hdr.opcode = SCM_OP_OPEN;
@@ -702,22 +784,22 @@ int scm_proxy_open_socket(int *local_id)
 	packet->open.protocol = SCM_PROTO_TCP;
 	packet->open.type = SCM_TYPE_STREAM;
 
-	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+	scm_send_msg(packet, sizeof(struct scm_packet));
 
-	printk(KERN_INFO "Sent to USB (OPEN) for &local_id=%p",local_id);
-	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr) +
 		packet->hdr.payload_len, true);
 	scm_proxy_wait_ack(&ack, packet->hdr.msg_id);
-	printk(KERN_INFO "Got ack=%p",ack);
 
 	ret = ack->ack.open;
-	if (ret == 0)
+	if (ret == 0) {
+		printk(KERN_INFO "scm_proxy_open_socket assigning sock id");
 		*local_id = ack->hdr.sock_id;
+	}
 
 	kfree(packet);
 	kfree(ack);
-
+	printk(KERN_INFO "scm_proxy_open_socket returning %d, *local_id=%d", ret, *local_id);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
@@ -731,10 +813,10 @@ void scm_proxy_close_socket(int local_id)
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
 	packet->hdr.payload_len = 0;
 
-	//xaprc00x_usb_send_msg(packet, sizeof(struct scm_packet_hdr));
+	scm_send_msg(packet, sizeof(struct scm_packet_hdr));
 
 	printk(KERN_INFO "Sent to USB (CLOSE)");
-	 print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr), true);
 
 	scm_proxy_wait_ack(&ack, packet->hdr.msg_id);
