@@ -56,7 +56,7 @@ static int xaprc00x_sock_shutdown(struct socket *sock, int how )
 		sk->sk_shutdown = SHUTDOWN_MASK;
 	}
 
-	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
+	//printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
 
         scm_proxy_close_socket( psk->local_id );
 
@@ -73,7 +73,7 @@ static int xaprc00x_sock_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	int err;
-	printk( KERN_INFO "xaprc00x_socket : releasing socket\n" );
+	//printk( KERN_INFO "xaprc00x_socket : releasing socket\n" );
 
 	if ( !sk ) 
 	{
@@ -97,7 +97,7 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr, int
 	int ret;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->local_id );
+	//printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->local_id );
 
 	ret = scm_proxy_connect_socket(psk->local_id, addr, alen);
 	return ret;
@@ -124,7 +124,7 @@ static int xaprc00x_sock_sendmsg( struct socket *sock,
 	void *data = kmalloc( len, GFP_KERNEL );
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	printk( KERN_INFO "scm sendmsg not supported %d\n", psk->local_id );
+	//printk( KERN_INFO "scm sendmsg not supported %d\n", psk->local_id );
 
 	return 0;
 }
@@ -138,7 +138,7 @@ static int xaprc00x_sock_recvmsg(struct socket *sock,
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 	char *buf = kmalloc( size, GFP_KERNEL );
 
-	printk( KERN_INFO "scm recv not supported %d\n", psk->local_id );
+	//printk( KERN_INFO "scm recv not supported %d\n", psk->local_id );
 
 	kfree( buf );
 
@@ -235,7 +235,7 @@ exit:
  */
 static int scm_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
 {
-	struct sock *sk = sock->sk;
+	struct sock *sk;
 	struct xaprc00x_pinfo *psk;
 	int ret;
 
