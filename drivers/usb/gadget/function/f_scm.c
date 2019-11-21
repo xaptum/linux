@@ -675,11 +675,7 @@ DEFINE_MUTEX(scm_msg_id_mutex);
 /* Stubs for now */
 void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id)
 {
-	volatile int i;
-	printk(KERN_INFO "scm_proxy_wait_ack start");
 	*packet = kzalloc(sizeof(struct scm_packet),GFP_ATOMIC);
-	for(i=0;i<100000000;i++){if(i%1000000==0){printk(KERN_INFO "scm_proxy_wait_ack continue...");}}
-	printk(KERN_INFO "scm_proxy_wait_ack exit");
 	return;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_wait_ack);
