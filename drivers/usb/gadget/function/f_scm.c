@@ -29,7 +29,7 @@
 
 /*
  * Change to your devices appropiate value and add an entry to the host drivers
- * device table 
+ * device table
  */
 #define SCM_SUBCLASS 0xab
 #define MAX_INT_PACKET_SIZE    64
@@ -65,7 +65,7 @@ struct f_scm *g_scm = NULL;
 LIST_HEAD(g_ack_list);
 static wait_queue_head_t scm_ack_wait_queue;
 
-static struct scm_packet *ack_list_get_by_id(int id)
+static struct scm_packet *ack_list_pop_by_id(int id)
 {
 	struct list_head *position = NULL;
 	list_for_each(position, &g_ack_list)
@@ -76,6 +76,7 @@ static struct scm_packet *ack_list_get_by_id(int id)
 		struct scm_packet *msg = entry->packet;
 		if (msg->hdr.msg_id == id)
 		{
+			list_del(&entry->list_handle);
 			return msg;
 		}
 	}
@@ -376,8 +377,6 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 		return -ENODEV;
 	}
 
-	scm->req_out = usb_ep_alloc_request( g_scm->cmd_out, GFP_ATOMIC );
-
 
 	/* support high speed hardware */
 	hs_scm_out_desc.bEndpointAddress =
@@ -404,7 +403,6 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 			scm_ss_descs, NULL);
 	if (ret)
 		goto fail;
-
 
 	DBG(cdev, "SCM bind complete at %s speed\n",
 		gadget_is_superspeed(c->cdev->gadget) ? "super" :
@@ -456,9 +454,8 @@ static void disable_ep(struct usb_composite_dev *cdev, struct usb_ep *ep)
 
 static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 {
-	struct usb_request	*req_in = NULL;
-	int			result = 0;
-
+	int result = 0;
+	printk(KERN_INFO "enable_scm");
 	// Enable the endpoints
 	result = enable_endpoint(cdev, scm, scm->bulk_in);
 	if (result) {
@@ -481,25 +478,38 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 		goto exit_free_bo;
 	}
 
-	req_in = alloc_ep_req(scm->cmd_in, MAX_INT_PACKET_SIZE);
-	if (!req_in) {
-		result = -ENOMEM;
-		goto exit_free_ci;
-	}
-	req_in->context = scm;
-	req_in->complete = scm_send_msg_complete;
-	scm->req_in = req_in;
-
 	result = enable_endpoint(cdev, scm, scm->cmd_out);
 	if (result) {
 		ERROR(cdev, "enable_endpoint for cmd_out failed ret=%d",
 			result);
+		goto exit_free_ci;
+	}
+
+	scm->req_in = alloc_ep_req(scm->cmd_in, MAX_INT_PACKET_SIZE);
+	if (!scm->req_in) {
+		ERROR(cdev, "alloc_ep_req for req_in failed");
+		result = -ENOMEM;
+		goto exit_free_co;
+	}
+	scm->req_in->context = scm;
+	scm->req_in->complete = scm_send_msg_complete;
+
+	/* TODO use a better size than +64 */
+	scm->req_out = alloc_ep_req( scm->cmd_out, MAX_INT_PACKET_SIZE+64 );
+	if (!scm->req_out) {
+		ERROR(cdev, "alloc_ep_req for req_out failed");
+		result = -ENOMEM;
 		goto exit_free_ri;
 	}
+
+	scm_read_out_cmd();
+
 	goto exit;
 exit_free_ri:
-	free_ep_req(scm->cmd_in, req_in);
+	free_ep_req(scm->cmd_in, scm->req_in);
 	scm->req_in = NULL;
+exit_free_co:
+	disable_ep(cdev, scm->cmd_out);
 exit_free_ci:
 	disable_ep(cdev, scm->cmd_in);
 exit_free_bo:
@@ -575,7 +585,6 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 	scm->function.strings = scm_strings;
 
 	scm->function.free_func = scm_free_func;
-	printk(KERN_INFO "scm_alloc A");
 	g_scm = scm;
 
 	scm_proxy_init();
@@ -668,29 +677,26 @@ static void scm_in_msg_complete(struct usb_ep *ep, struct usb_request *req)
 }
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
 {
-	printk("Send msg complete req->status=%d",req->status);
 } 
 static void scm_send_msg(void *data, int len)
 {
 	struct usb_request *req = g_scm->req_in;
 	int ret;
 	if (!req) {
-		printk(KERN_INFO "scm_send_msg !req");
 		return;
 	}
 	req->buf = kmalloc(MAX_INT_PACKET_SIZE, GFP_ATOMIC);
 	memcpy(req->buf, data, len);
 	req->length = len;
-	printk(KERN_INFO "scm_send_msg: Sending message");
 	ret = usb_ep_queue(g_scm->cmd_in, g_scm->req_in, GFP_ATOMIC);
-	printk("ep queue returned %d", ret);
 }
 
 static void scm_notify_ack(struct scm_packet *packet)
 {
-	struct scm_packet_list_entry *entry = kmalloc(
-		sizeof(struct scm_packet_list_entry),
-		GFP_ATOMIC);
+	struct scm_packet_list_entry *entry = 
+		kmalloc(sizeof(struct scm_packet_list_entry),
+			GFP_ATOMIC);
+	INIT_LIST_HEAD( &entry->list_handle );
 	entry->packet = packet;
 	list_add(&g_ack_list, &entry->list_handle);
 	wake_up(&scm_ack_wait_queue);
@@ -701,14 +707,14 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len)
 {
 	/* Make sure the packet is big enough for the packet and payload
 	 * (checked in order to avoid reading bad memory) */
-	if(len < sizeof(*packet) || len < sizeof(*packet)+packet->hdr.payload_len)
+	if(!packet || len < sizeof(*packet) || len < sizeof(*packet)+packet->hdr.payload_len)
 		return;
 
 	/* Incoming command is either a close notificaiton or ACK */
 	switch (packet->hdr.opcode) {
 	case SCM_OP_ACK:
-		scm_notify_ack(packet);
 		printk("scm_process_out_cmd ACK");
+		scm_notify_ack(packet);
 		break;
 	case SCM_OP_CLOSE:
 		/* No current implementation */
@@ -721,13 +727,17 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len)
 }
 static void scm_read_out_cmd_cb(struct usb_ep *ep, struct usb_request *req)
 {
-	scm_process_out_cmd(req->buf, req->length);
+	if (req->buf) {
+		printk(KERN_INFO "scm_read_out_cmd_cb buf:");
+		print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+			16, 1, req->buf, req->actual, true);
+		scm_process_out_cmd(req->buf, req->actual);
+	}
 	scm_read_out_cmd();
 }
 static int scm_read_out_cmd(void)
 {
 	struct usb_request *out_req = g_scm->req_out;
-
 	out_req->length = sizeof(struct scm_packet) + 64;
 	out_req->buf = kmalloc(out_req->length, GFP_ATOMIC);
 	out_req->dma = 0;
@@ -753,15 +763,19 @@ DEFINE_MUTEX(scm_msg_id_mutex);
 /* Stubs for now */
 struct scm_payload_ack scm_proxy_wait_ack(int msg_id)
 {
-	struct scm_payload_ack ack;
+	struct scm_packet *ack;
+	struct scm_payload_ack empty = {0};
 	wait_event_timeout(scm_ack_wait_queue,
-		(ack_list_get_by_id(msg_id)!=NULL), SCM_ACK_TIMEOUT);
-	ack = (ack_list_get_by_id(msg_id))->ack;
+		((ack = ack_list_pop_by_id(msg_id))!=NULL), SCM_ACK_TIMEOUT);
 
-	printk(KERN_INFO "Got ACK for msg_id=%d", msg_id);
-	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
-		16, 1, &ack, sizeof(ack), true);
-	return ack;
+	if (ack) {
+		printk(KERN_INFO "scm_proxy_wait_ack ack:");
+		print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
+			16, 1, &ack->ack, sizeof(ack), true);
+	} else {
+		return empty;
+	}
+	return ack->ack;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_wait_ack);
 
@@ -776,6 +790,7 @@ static void scm_proxy_recv_msg(void *msg, int len)
 
 static void scm_proxy_init(void)
 {
+	printk(KERN_INFO "scm_proxy_init");
 	mutex_init(&scm_msg_id_mutex);
 	init_waitqueue_head(&scm_ack_wait_queue);
 	scm_msg_id = 0;
@@ -825,7 +840,6 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
 	int ret;
 	struct scm_payload_ack ack;
-	printk(KERN_INFO "scm_proxy_connect_socket A");
 
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id();
@@ -834,7 +848,6 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 		scm_proxy_assign_ip4(packet, addr);
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
-	printk(KERN_INFO "scm_proxy_connect_socket B");
 
 	scm_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
 
@@ -867,6 +880,7 @@ int scm_proxy_open_socket(int *local_id)
 
 	scm_send_msg(packet, sizeof(struct scm_packet));
 
+	printk(KERN_INFO "scm_proxy_open_socket sent:");
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr) +
 		packet->hdr.payload_len, true);
@@ -879,7 +893,6 @@ int scm_proxy_open_socket(int *local_id)
 	}
 
 	kfree(packet);
-	printk(KERN_INFO "scm_proxy_open_socket returning %d, *local_id=%d", ret, *local_id);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
@@ -895,7 +908,7 @@ void scm_proxy_close_socket(int local_id)
 
 	scm_send_msg(packet, sizeof(struct scm_packet_hdr));
 
-	printk(KERN_INFO "Sent to USB (CLOSE)");
+	printk(KERN_INFO "Sent to USB (CLOSE) sent:");
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr), true);
 
