@@ -36,12 +36,6 @@
 #define SCM_STATUS_INTERVAL_MS 4 //32
 #define SCM_ACK_TIMEOUT 10000
 
-/* Forward declarations */
-static void scm_in_msg_complete(struct usb_ep *ep, struct usb_request *req);
-static void scm_proxy_recv_msg(void *msg, int len);
-static void scm_proxy_init(void);
-static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
-static int scm_read_out_cmd(void);
 /**
  * Usb function structure definition
  */
@@ -61,28 +55,14 @@ struct scm_packet_list_entry {
 	struct scm_packet *packet;
 	struct list_head list_handle;
 };
-struct f_scm *g_scm = NULL;
-LIST_HEAD(g_ack_list);
-static wait_queue_head_t scm_ack_wait_queue;
 
-static struct scm_packet *ack_list_pop_by_id(int id)
-{
-	struct list_head *position = NULL;
-	list_for_each(position, &g_ack_list)
-	{
-		struct scm_packet_list_entry *entry = 
-			list_entry(position, struct scm_packet_list_entry,
-				list_handle);
-		struct scm_packet *msg = entry->packet;
-		if (msg->hdr.msg_id == id)
-		{
-			list_del(&entry->list_handle);
-			return msg;
-		}
-	}
-	return NULL;
-}
-
+/* Forward declarations */
+static void scm_proxy_recv_msg(void *msg, int len);
+static void scm_proxy_init(void *context);
+static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
+static int scm_read_out_cmd(struct f_scm *scm_inst);
+static void scm_notify_ack(struct scm_packet *packet,
+	void *inst);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -417,6 +397,7 @@ static void scm_free_func(struct usb_function *f)
 
 	opts = container_of(f->fi, struct f_scm_opts, func_inst);
 
+	printk(KERN_INFO "scm_free_func calling mutex_lock");
 	mutex_lock(&opts->lock);
 	opts->refcnt--;
 	mutex_unlock(&opts->lock);
@@ -502,7 +483,7 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 		goto exit_free_ri;
 	}
 
-	scm_read_out_cmd();
+	scm_read_out_cmd(scm);
 
 	goto exit;
 exit_free_ri:
@@ -574,6 +555,7 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 
 	scm_opts = container_of(fi, struct f_scm_opts, func_inst);
 
+	printk(KERN_INFO "scm_alloc calling mutex_lock");
 	mutex_lock(&scm_opts->lock);
 	scm_opts->refcnt++;
 	mutex_unlock(&scm_opts->lock);
@@ -585,9 +567,8 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 	scm->function.strings = scm_strings;
 
 	scm->function.free_func = scm_free_func;
-	g_scm = scm;
 
-	scm_proxy_init();
+	scm_proxy_init(scm);
 
 	return &scm->function;
 }
@@ -639,6 +620,7 @@ static struct usb_function_instance *scm_alloc_inst(void)
 	if (!scm_opts)
 		return ERR_PTR(-ENOMEM);
 
+	printk(KERN_INFO "scm_alloc calling mutex_init");
 	mutex_init(&scm_opts->lock);
 
 	scm_opts->func_inst.free_func_inst = scm_free_instance;
@@ -666,21 +648,12 @@ module_init(f_scm_init);
 module_exit(f_scm_exit);
 
 /* Handle USB listening and writing */
-static void scm_in_msg_complete(struct usb_ep *ep, struct usb_request *req)
-{
-	printk("scm_in_msg_complete");
-	//scm_proxy_recv_msg(req->buf, req->length);
-
-	/* Keep listening as long as we are still in an active configuration */
-	//if (g_scm && g_scm->req_in)
-		//usb_ep_queue(g_scm->cmd_out, g_scm->req_out, GFP_ATOMIC);
-}
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
 {
 } 
-static void scm_send_msg(void *data, int len)
+static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 {
-	struct usb_request *req = g_scm->req_in;
+	struct usb_request *req = scm_inst->req_in;
 	int ret;
 	if (!req) {
 		return;
@@ -688,33 +661,24 @@ static void scm_send_msg(void *data, int len)
 	req->buf = kmalloc(MAX_INT_PACKET_SIZE, GFP_ATOMIC);
 	memcpy(req->buf, data, len);
 	req->length = len;
-	ret = usb_ep_queue(g_scm->cmd_in, g_scm->req_in, GFP_ATOMIC);
-}
-
-static void scm_notify_ack(struct scm_packet *packet)
-{
-	struct scm_packet_list_entry *entry = 
-		kmalloc(sizeof(struct scm_packet_list_entry),
-			GFP_ATOMIC);
-	INIT_LIST_HEAD( &entry->list_handle );
-	entry->packet = packet;
-	list_add(&g_ack_list, &entry->list_handle);
-	wake_up(&scm_ack_wait_queue);
+	ret = usb_ep_queue(scm_inst->cmd_in, scm_inst->req_in, GFP_ATOMIC);
 }
 
 /* Reads SCM command from the host */
-static void scm_process_out_cmd(struct scm_packet *packet, size_t len)
+static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
+	void *inst)
 {
 	/* Make sure the packet is big enough for the packet and payload
 	 * (checked in order to avoid reading bad memory) */
-	if(!packet || len < sizeof(*packet) || len < sizeof(*packet)+packet->hdr.payload_len)
+	if(!packet || len < sizeof(*packet) || 
+		len < (sizeof(*packet)+packet->hdr.payload_len))
 		return;
 
 	/* Incoming command is either a close notificaiton or ACK */
 	switch (packet->hdr.opcode) {
 	case SCM_OP_ACK:
 		printk("scm_process_out_cmd ACK");
-		scm_notify_ack(packet);
+		scm_notify_ack(packet, inst);
 		break;
 	case SCM_OP_CLOSE:
 		/* No current implementation */
@@ -728,21 +692,19 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len)
 static void scm_read_out_cmd_cb(struct usb_ep *ep, struct usb_request *req)
 {
 	if (req->buf) {
-		printk(KERN_INFO "scm_read_out_cmd_cb buf:");
-		print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
-			16, 1, req->buf, req->actual, true);
-		scm_process_out_cmd(req->buf, req->actual);
+		scm_process_out_cmd(req->buf, req->actual, req->context);
 	}
-	scm_read_out_cmd();
+	scm_read_out_cmd(req->context);
 }
-static int scm_read_out_cmd(void)
+static int scm_read_out_cmd(struct f_scm *scm_inst)
 {
-	struct usb_request *out_req = g_scm->req_out;
+	struct usb_request *out_req = scm_inst->req_out;
 	out_req->length = sizeof(struct scm_packet) + 64;
 	out_req->buf = kmalloc(out_req->length, GFP_ATOMIC);
 	out_req->dma = 0;
 	out_req->complete = scm_read_out_cmd_cb;
-	usb_ep_queue(g_scm->cmd_out, out_req, GFP_ATOMIC);
+	out_req->context = scm_inst;
+	usb_ep_queue(scm_inst->cmd_out, out_req, GFP_ATOMIC);
 
 	return 0;	
 }
@@ -755,18 +717,59 @@ MODULE_VERSION("0.0.1");
 
 /* SCM Proxy.*/
 /* This probably isnt the final place this code will be placed */
+struct scm_proxy_inst {
+	void *usb_context;
+	__u8 scm_msg_id;
+	struct mutex scm_msg_id_mutex;
+	wait_queue_head_t ack_wait_queue;
+	struct list_head ack_list;
+};
 
-/* For now we will just use a rotating count 0-255 */
-__u8 scm_msg_id;
-DEFINE_MUTEX(scm_msg_id_mutex);
+void scm_notify_ack(struct scm_packet *packet, void *inst)
+{
+	struct scm_packet_list_entry *entry = 
+		kmalloc(sizeof(struct scm_packet_list_entry),
+			GFP_ATOMIC);
+	struct scm_proxy_inst * proxy_inst = inst;
+	INIT_LIST_HEAD(&entry->list_handle);
+	entry->packet = packet;
+	list_add(&proxy_inst->ack_list, &entry->list_handle);
+	wake_up(&proxy_inst->ack_wait_queue);
+}
 
-/* Stubs for now */
-struct scm_payload_ack scm_proxy_wait_ack(int msg_id)
+static struct scm_packet *ack_list_pop_by_id(int id,
+	struct scm_proxy_inst *inst)
+{
+	struct list_head *position = NULL;
+	list_for_each(position, &inst->ack_list)
+	{
+		struct scm_packet_list_entry *entry = 
+			list_entry(position, struct scm_packet_list_entry,
+				list_handle);
+		struct scm_packet *msg = entry->packet;
+		if (msg->hdr.msg_id == id)
+		{
+			list_del(&entry->list_handle);
+			return msg;
+		}
+	}
+	return NULL;
+}
+
+
+/* Global for now but will be localized when we need to support other devices.
+ * The idea of making this global instead of the USB instance is that the proxy
+ * manages the USB device, the USB parts shouldn't know the proxy context.
+ */
+struct scm_proxy_inst g_scm_proxy_inst = {0};
+
+struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_inst* inst)
 {
 	struct scm_packet *ack;
 	struct scm_payload_ack empty = {0};
-	wait_event_timeout(scm_ack_wait_queue,
-		((ack = ack_list_pop_by_id(msg_id))!=NULL), SCM_ACK_TIMEOUT);
+	wait_event_timeout(inst->ack_wait_queue,
+		((ack = ack_list_pop_by_id(msg_id, inst))!=NULL),
+		SCM_ACK_TIMEOUT);
 
 	if (ack) {
 		printk(KERN_INFO "scm_proxy_wait_ack ack:");
@@ -777,7 +780,6 @@ struct scm_payload_ack scm_proxy_wait_ack(int msg_id)
 	}
 	return ack->ack;
 }
-EXPORT_SYMBOL_GPL(scm_proxy_wait_ack);
 
 
 /* Copies an in msg for use in the proxy */
@@ -788,20 +790,28 @@ static void scm_proxy_recv_msg(void *msg, int len)
 		16, 1, msg, len, true);
 }
 
-static void scm_proxy_init(void)
+void scm_proxy_init(void *usb_context)
 {
+	struct scm_proxy_inst *proxy_inst;
 	printk(KERN_INFO "scm_proxy_init");
-	mutex_init(&scm_msg_id_mutex);
-	init_waitqueue_head(&scm_ack_wait_queue);
-	scm_msg_id = 0;
+
+	proxy_inst = kzalloc(sizeof(struct scm_proxy_inst), GFP_KERNEL);
+	if (!proxy_inst)
+		return;
+	mutex_init(&proxy_inst->scm_msg_id_mutex);
+	init_waitqueue_head(&proxy_inst->ack_wait_queue);
+	proxy_inst->usb_context = usb_context;
+	proxy_inst->scm_msg_id = 0;
 }
 
-static int scm_proxy_get_msg_id(void)
+static int scm_proxy_get_msg_id(void *context)
 {
 	int id;
-	mutex_lock(&scm_msg_id_mutex);
-	id = scm_msg_id++;
-	mutex_unlock(&scm_msg_id_mutex);
+	struct scm_proxy_inst *proxy_context = context;
+	printk(KERN_INFO "scm_proxy_get_msg_id calling mutex_lock");
+	mutex_lock(&proxy_context->scm_msg_id_mutex);
+	id = proxy_context->scm_msg_id++;
+	mutex_unlock(&proxy_context->scm_msg_id_mutex);
 	return id;
 }
 
@@ -835,28 +845,33 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 		sizeof(union scm_payload_connect_ip_addr) +
 		sizeof(struct scm_payload_connect_ip6);
 }
-int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
+int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, void *context)
 {
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
 	int ret;
 	struct scm_payload_ack ack;
+	struct scm_proxy_inst *proxy_inst;
+
+	proxy_inst = context;
 
 	packet->hdr.opcode = SCM_OP_CONNECT;
-	packet->hdr.msg_id = scm_proxy_get_msg_id();
+	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
 
 	if (addr->sa_family == AF_INET)
 		scm_proxy_assign_ip4(packet, addr);
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
 
-	scm_send_msg(packet, sizeof(struct scm_packet_hdr) + packet->hdr.payload_len);
+	scm_send_msg(packet,
+		sizeof(struct scm_packet_hdr) + packet->hdr.payload_len,
+		proxy_inst->usb_context);
 
 	printk(KERN_INFO "Sent to USB (CONN)");
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr) +
 		packet->hdr.payload_len, true);
 
-	ack = scm_proxy_wait_ack(packet->hdr.msg_id);
+	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 	ret = ack.connect;
 
 	kfree(packet);
@@ -865,26 +880,30 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr)
 }
 EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 
-int scm_proxy_open_socket(int *local_id)
+int scm_proxy_open_socket(int *local_id, void *context)
 {
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_ATOMIC);
 	int ret;
 	struct scm_payload_ack ack;
+	struct scm_proxy_inst *proxy_inst;
+
+	proxy_inst = context;
 
 	packet->hdr.opcode = SCM_OP_OPEN;
-	packet->hdr.msg_id = scm_proxy_get_msg_id();
+	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
 	packet->hdr.payload_len = sizeof(struct scm_payload_open);
 	packet->open.addr_family = SCM_FAM_IP;
 	packet->open.protocol = SCM_PROTO_TCP;
 	packet->open.type = SCM_TYPE_STREAM;
 
-	scm_send_msg(packet, sizeof(struct scm_packet));
+	scm_send_msg(packet, sizeof(struct scm_packet),
+		proxy_inst->usb_context);
 
 	printk(KERN_INFO "scm_proxy_open_socket sent:");
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr) +
 		packet->hdr.payload_len, true);
-	ack = scm_proxy_wait_ack(packet->hdr.msg_id);
+	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 
 	ret = ack.open.code;
 	if (ret == 0) {
@@ -897,22 +916,26 @@ int scm_proxy_open_socket(int *local_id)
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 
-void scm_proxy_close_socket(int local_id)
+void scm_proxy_close_socket(int local_id, void *context)
 {
 	struct scm_packet *ack;
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	struct scm_proxy_inst *proxy_inst;
+
+	proxy_inst = context;
 
 	packet->hdr.opcode = SCM_OP_CLOSE;
-	packet->hdr.msg_id = scm_proxy_get_msg_id();
+	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
 	packet->hdr.payload_len = 0;
 
-	scm_send_msg(packet, sizeof(struct scm_packet_hdr));
+	scm_send_msg(packet, sizeof(struct scm_packet_hdr),
+		proxy_inst->usb_context);
 
 	printk(KERN_INFO "Sent to USB (CLOSE) sent:");
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 		16, 1, packet, sizeof(struct scm_packet_hdr), true);
 
-	scm_proxy_wait_ack(packet->hdr.msg_id);
+	scm_proxy_wait_ack(packet->hdr.msg_id, context);
 	kfree(packet);
 	return;
 }
