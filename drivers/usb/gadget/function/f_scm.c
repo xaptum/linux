@@ -4,7 +4,6 @@
  *
  * Copyright (C) 2018-2019 Xaptum, Inc.
  */
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
@@ -50,6 +49,8 @@ struct f_scm {
 
 	struct usb_request	*req_in;
 	struct usb_request	*req_out;
+
+	void *proxy_context;
 };
 struct scm_packet_list_entry {
 	struct scm_packet *packet;
@@ -58,11 +59,14 @@ struct scm_packet_list_entry {
 
 /* Forward declarations */
 static void scm_proxy_recv_msg(void *msg, int len);
-static void scm_proxy_init(void *context);
+static void *scm_proxy_init(void *context);
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
 static int scm_read_out_cmd(struct f_scm *scm_inst);
 static void scm_notify_ack(struct scm_packet *packet,
 	void *inst);
+
+/* Socket extern defs */
+extern int xaprc00x_register(void *proxy_context);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -384,6 +388,9 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	if (ret)
 		goto fail;
 
+	/* Initialize the proxy and store it's instance so we can call it later */
+	scm->proxy_context = scm_proxy_init(scm);
+
 	DBG(cdev, "SCM bind complete at %s speed\n",
 		gadget_is_superspeed(c->cdev->gadget) ? "super" :
 		gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full");
@@ -397,7 +404,6 @@ static void scm_free_func(struct usb_function *f)
 
 	opts = container_of(f->fi, struct f_scm_opts, func_inst);
 
-	printk(KERN_INFO "scm_free_func calling mutex_lock");
 	mutex_lock(&opts->lock);
 	opts->refcnt--;
 	mutex_unlock(&opts->lock);
@@ -555,7 +561,6 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 
 	scm_opts = container_of(fi, struct f_scm_opts, func_inst);
 
-	printk(KERN_INFO "scm_alloc calling mutex_lock");
 	mutex_lock(&scm_opts->lock);
 	scm_opts->refcnt++;
 	mutex_unlock(&scm_opts->lock);
@@ -567,8 +572,6 @@ static struct usb_function *scm_alloc(struct usb_function_instance *fi)
 	scm->function.strings = scm_strings;
 
 	scm->function.free_func = scm_free_func;
-
-	scm_proxy_init(scm);
 
 	return &scm->function;
 }
@@ -620,7 +623,6 @@ static struct usb_function_instance *scm_alloc_inst(void)
 	if (!scm_opts)
 		return ERR_PTR(-ENOMEM);
 
-	printk(KERN_INFO "scm_alloc calling mutex_init");
 	mutex_init(&scm_opts->lock);
 
 	scm_opts->func_inst.free_func_inst = scm_free_instance;
@@ -666,7 +668,7 @@ static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 
 /* Reads SCM command from the host */
 static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
-	void *inst)
+	struct f_scm *usb_context)
 {
 	/* Make sure the packet is big enough for the packet and payload
 	 * (checked in order to avoid reading bad memory) */
@@ -678,7 +680,7 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 	switch (packet->hdr.opcode) {
 	case SCM_OP_ACK:
 		printk("scm_process_out_cmd ACK");
-		scm_notify_ack(packet, inst);
+		scm_notify_ack(packet, usb_context->proxy_context);
 		break;
 	case SCM_OP_CLOSE:
 		/* No current implementation */
@@ -721,7 +723,7 @@ struct scm_proxy_inst {
 	void *usb_context;
 	__u8 scm_msg_id;
 	struct mutex scm_msg_id_mutex;
-	wait_queue_head_t ack_wait_queue;
+	struct wait_queue_head ack_wait_queue;
 	struct list_head ack_list;
 };
 
@@ -730,6 +732,10 @@ void scm_notify_ack(struct scm_packet *packet, void *inst)
 	struct scm_packet_list_entry *entry = 
 		kmalloc(sizeof(struct scm_packet_list_entry),
 			GFP_ATOMIC);
+	if (!entry) {
+		printk(KERN_INFO "Allocation for entry failed");
+		return;
+	}
 	struct scm_proxy_inst * proxy_inst = inst;
 	INIT_LIST_HEAD(&entry->list_handle);
 	entry->packet = packet;
@@ -756,13 +762,6 @@ static struct scm_packet *ack_list_pop_by_id(int id,
 	return NULL;
 }
 
-
-/* Global for now but will be localized when we need to support other devices.
- * The idea of making this global instead of the USB instance is that the proxy
- * manages the USB device, the USB parts shouldn't know the proxy context.
- */
-struct scm_proxy_inst g_scm_proxy_inst = {0};
-
 struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_inst* inst)
 {
 	struct scm_packet *ack;
@@ -772,7 +771,6 @@ struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_inst* ins
 		SCM_ACK_TIMEOUT);
 
 	if (ack) {
-		printk(KERN_INFO "scm_proxy_wait_ack ack:");
 		print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
 			16, 1, &ack->ack, sizeof(ack), true);
 	} else {
@@ -790,7 +788,7 @@ static void scm_proxy_recv_msg(void *msg, int len)
 		16, 1, msg, len, true);
 }
 
-void scm_proxy_init(void *usb_context)
+void *scm_proxy_init(void *usb_context)
 {
 	struct scm_proxy_inst *proxy_inst;
 	printk(KERN_INFO "scm_proxy_init");
@@ -800,15 +798,18 @@ void scm_proxy_init(void *usb_context)
 		return;
 	mutex_init(&proxy_inst->scm_msg_id_mutex);
 	init_waitqueue_head(&proxy_inst->ack_wait_queue);
+	//proxy_inst->ack_wait_queue.head.next = &proxy_inst->ack_wait_queue.head;
 	proxy_inst->usb_context = usb_context;
 	proxy_inst->scm_msg_id = 0;
+
+	/* Start up the Xaptum SCM socket module */
+	xaprc00x_register(proxy_inst);
+	return proxy_inst;
 }
 
-static int scm_proxy_get_msg_id(void *context)
+static int scm_proxy_get_msg_id(struct scm_proxy_inst *proxy_context)
 {
 	int id;
-	struct scm_proxy_inst *proxy_context = context;
-	printk(KERN_INFO "scm_proxy_get_msg_id calling mutex_lock");
 	mutex_lock(&proxy_context->scm_msg_id_mutex);
 	id = proxy_context->scm_msg_id++;
 	mutex_unlock(&proxy_context->scm_msg_id_mutex);
@@ -845,7 +846,7 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 		sizeof(union scm_payload_connect_ip_addr) +
 		sizeof(struct scm_payload_connect_ip6);
 }
-int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, void *context)
+int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen, void *context)
 {
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
 	int ret;
@@ -890,7 +891,7 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	proxy_inst = context;
 
 	packet->hdr.opcode = SCM_OP_OPEN;
-	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
+	packet->hdr.msg_id = scm_proxy_get_msg_id(proxy_inst);
 	packet->hdr.payload_len = sizeof(struct scm_payload_open);
 	packet->open.addr_family = SCM_FAM_IP;
 	packet->open.protocol = SCM_PROTO_TCP;
