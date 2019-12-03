@@ -18,7 +18,6 @@ extern void scm_proxy_close_socket(int local_id);
 extern int scm_proxy_open_socket(int *local_id);
 extern int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen);
 extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
-
 /**
  * psock local socket data
  */
