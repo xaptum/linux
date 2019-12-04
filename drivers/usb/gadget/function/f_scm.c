@@ -723,6 +723,7 @@ struct scm_proxy_inst {
 	void *usb_context;
 	__u8 scm_msg_id;
 	struct mutex scm_msg_id_mutex;
+	spinlock_t ack_list_lock;
 	struct wait_queue_head ack_wait_queue;
 	struct list_head ack_list;
 };
@@ -738,14 +739,22 @@ void scm_notify_ack(struct scm_packet *packet, void *inst)
 	struct scm_proxy_inst * proxy_inst = inst;
 	INIT_LIST_HEAD(&entry->list_handle);
 	entry->packet = packet;
+
+	spin_lock(&(info->ack_list_lock));
 	list_add(&proxy_inst->ack_list, &entry->list_handle);
+	spin_unlock(&(info->ack_list_lock));
+
 	wake_up(&proxy_inst->ack_wait_queue);
 }
 
 static struct scm_packet *ack_list_pop_by_id(int id,
 	struct scm_proxy_inst *inst)
 {
+	unsigned long flags;
 	struct list_head *position = NULL;
+	/* Do not start looking if the list is being added to */
+
+	spin_lock_irqsave(&proxy_inst->ack_list_lock, flags);
 	list_for_each(position, &inst->ack_list)
 	{
 		struct scm_packet_list_entry *entry = 
@@ -758,6 +767,7 @@ static struct scm_packet *ack_list_pop_by_id(int id,
 			return msg;
 		}
 	}
+	spin_unlock_irqrestore(&proxy_inst->ack_list_lock, flags);
 	return NULL;
 }
 
@@ -800,8 +810,11 @@ void *scm_proxy_init(void *usb_context)
 	proxy_inst->usb_context = usb_context;
 	proxy_inst->scm_msg_id = 0;
 
+	spin_lock_init(&proxy_inst->ack_list_lock);
+
 	/* Start up the Xaptum SCM socket module */
 	xaprc00x_register(proxy_inst);
+
 	return proxy_inst;
 }
 
