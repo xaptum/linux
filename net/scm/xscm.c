@@ -63,7 +63,7 @@ static int xaprc00x_sock_shutdown(struct socket *sock, int how )
 		sk->sk_shutdown = SHUTDOWN_MASK;
 	}
 
-	//printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
+	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
 
         scm_proxy_close_socket(psk->local_id, g_proxy_context);
 
@@ -80,7 +80,8 @@ static int xaprc00x_sock_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
 	int err;
-	//printk( KERN_INFO "xaprc00x_socket : releasing socket\n" );
+
+	printk( KERN_INFO "xaprc00x_socket : releasing socket\n" );
 
 	if ( !sk ) 
 	{
