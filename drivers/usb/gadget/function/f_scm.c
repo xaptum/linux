@@ -733,7 +733,6 @@ void scm_notify_ack(struct scm_packet *packet, void *inst)
 		kmalloc(sizeof(struct scm_packet_list_entry),
 			GFP_ATOMIC);
 	if (!entry) {
-		printk(KERN_INFO "Allocation for entry failed");
 		return;
 	}
 	struct scm_proxy_inst * proxy_inst = inst;
@@ -791,7 +790,6 @@ static void scm_proxy_recv_msg(void *msg, int len)
 void *scm_proxy_init(void *usb_context)
 {
 	struct scm_proxy_inst *proxy_inst;
-	printk(KERN_INFO "scm_proxy_init");
 
 	proxy_inst = kzalloc(sizeof(struct scm_proxy_inst), GFP_KERNEL);
 	if (!proxy_inst)
@@ -858,19 +856,15 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen, void
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
 
-	if (addr->sa_family == AF_INET)
+	if (addr->sa_family == AF_INET) {
 		scm_proxy_assign_ip4(packet, addr);
+	}
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
 
 	scm_send_msg(packet,
 		sizeof(struct scm_packet_hdr) + packet->hdr.payload_len,
 		proxy_inst->usb_context);
-
-	printk(KERN_INFO "Sent to USB (CONN)");
-	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
-		16, 1, packet, sizeof(struct scm_packet_hdr) +
-		packet->hdr.payload_len, true);
 
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 	ret = ack.connect;
@@ -900,15 +894,10 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	scm_send_msg(packet, sizeof(struct scm_packet),
 		proxy_inst->usb_context);
 
-	printk(KERN_INFO "scm_proxy_open_socket sent:");
-	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_OFFSET,
-		16, 1, packet, sizeof(struct scm_packet_hdr) +
-		packet->hdr.payload_len, true);
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 
 	ret = ack.open.code;
 	if (ret == 0) {
-		printk(KERN_INFO "scm_proxy_open_socket assigning sock id");
 		*local_id = ack.open.sock_id;
 	}
 
