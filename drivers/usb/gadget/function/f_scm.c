@@ -12,6 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/net.h>
 #include <net/sock.h>
+#include <linux/spinlock.h>
 #include "u_scm.h"
 #include "u_f.h"
 
@@ -723,6 +724,7 @@ struct scm_proxy_inst {
 	void *usb_context;
 	__u8 scm_msg_id;
 	struct mutex scm_msg_id_mutex;
+	spinlock_t ack_list_lock;
 	struct wait_queue_head ack_wait_queue;
 	struct list_head ack_list;
 };
@@ -738,27 +740,45 @@ void scm_notify_ack(struct scm_packet *packet, void *inst)
 	struct scm_proxy_inst * proxy_inst = inst;
 	INIT_LIST_HEAD(&entry->list_handle);
 	entry->packet = packet;
+
+	spin_lock(&(proxy_inst->ack_list_lock));
 	list_add(&proxy_inst->ack_list, &entry->list_handle);
+	spin_unlock(&(proxy_inst->ack_list_lock));
+
 	wake_up(&proxy_inst->ack_wait_queue);
 }
 
 static struct scm_packet *ack_list_pop_by_id(int id,
 	struct scm_proxy_inst *inst)
 {
+	unsigned long flags;
 	struct list_head *position = NULL;
-	list_for_each(position, &inst->ack_list)
+	struct list_head *next = NULL;
+	struct scm_packet *ret = NULL;
+	/* Do not start looking if the list is being added to */
+
+	spin_lock_irqsave(&inst->ack_list_lock, flags);
+	printk("Starting list_for_each_safe with ack->list=%p next=%p prev=%p",
+		&inst->ack_list,
+		inst->ack_list.next,
+		inst->ack_list.prev);
+	list_for_each_safe(position, next, &inst->ack_list)
 	{
 		struct scm_packet_list_entry *entry = 
 			list_entry(position, struct scm_packet_list_entry,
 				list_handle);
+		if (!entry)
+			continue;
 		struct scm_packet *msg = entry->packet;
 		if (msg->hdr.msg_id == id)
 		{
 			list_del(&entry->list_handle);
-			return msg;
+			ret = msg;
+			break;
 		}
 	}
-	return NULL;
+	spin_unlock_irqrestore(&inst->ack_list_lock, flags);
+	return ret;
 }
 
 struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_inst* inst)
@@ -800,8 +820,12 @@ void *scm_proxy_init(void *usb_context)
 	proxy_inst->usb_context = usb_context;
 	proxy_inst->scm_msg_id = 0;
 
+	spin_lock_init(&proxy_inst->ack_list_lock);
+	INIT_LIST_HEAD(&proxy_inst->ack_list)
+
 	/* Start up the Xaptum SCM socket module */
 	xaprc00x_register(proxy_inst);
+
 	return proxy_inst;
 }
 
