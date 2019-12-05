@@ -1,49 +1,41 @@
 /**
- * @file xaprc00x_socket.c
- * @brief Create the psock socket type
- *  This creates a new socket type for proxying to the connected host device
- *  This part of the module communicates with the psock_proxy part
- * @author Jeroen Z
+ * @file xscm.c
+ * @brief A socket driver for Xaptums SCM implementation
+ * @author Daniel Berliner
  */
+
+#define XAPRC00X_SK_BUFF_SIZE 512
+#define XAPRC00X_SK_SND_TIMEO 1000
 
 #include <linux/module.h>
 #include <linux/net.h>
 #include <net/sock.h>
 #include <linux/xscm.h>
-#define PSOCK_SK_BUFF_SIZE 512
-#define PSOCK_SK_SND_TIMEO 1000
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
-MODULE_DESCRIPTION("SCM Driver socket");
+MODULE_DESCRIPTION("SCM Socket Driver");
 MODULE_VERSION("0.0.1");
 
-/* Extern proxy defs */
+/* SCM Proxy external defs */
 extern void scm_proxy_close_socket(int local_id, void *context);
 extern int scm_proxy_open_socket(int *local_id, void *context);
 extern int scm_proxy_connect_socket(int local_id, struct sockaddr *addr,
 	int alen, void * context);
 extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
+
 /**
- * psock local socket data
- */
+* In addition to the Linux sock information we need to keep track of the local
+* ID given to us by the proxy
+*/
 struct xaprc00x_pinfo
 {
-	struct sock		sk;	/**< @note Needs to be here as first entry !! */
+	struct sock		sk;
 	int			local_id;
 };
 
+/* This socket driver may only be linked to one SCM proxy instance */
 static void *g_proxy_context = NULL;
-
-/**
- * kill the socket
- * Sets flag for removal
- */
-static void xaprc00x_sock_kill(struct sock *sk )
-{
-	sock_set_flag(sk, SOCK_DEAD);
-	sock_put(sk);
-}
 
 /**
  * Function called for socket shutdown
@@ -92,7 +84,8 @@ static int xaprc00x_sock_release(struct socket *sock)
 
 	sock_orphan(sk);
 
-	xaprc00x_sock_kill(sk);
+	sock_set_flag(sk, SOCK_DEAD);
+	sock_put(sk);
 
 	return err;
 }
@@ -110,17 +103,6 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr, int
 	ret = scm_proxy_connect_socket(psk->local_id, addr, alen, g_proxy_context);
 	return ret;
 }
-
-/**
- * Function for getname
- */
-/*
-static int xaprc00x_sock_getname(struct socket *sock, struct sockaddr *addr, int peer )
-{
-	printk( KERN_INFO "psock getname\n" );
-	return 0;
-}
-*/
 
 /**
  * Function for sending a msg over the socket
@@ -203,8 +185,8 @@ static struct proto xaprc00x_proto =
  */
 static void xaprc00x_sock_destruct(struct sock *sk)
 {
-//	skb_queue_purge(&sk->sk_receive_queue);
-//	skb_queue_purge(&sk->sk_write_queue);
+	skb_queue_purge(&sk->sk_receive_queue);
+	skb_queue_purge(&sk->sk_write_queue);
 }
 
 /**
@@ -225,9 +207,9 @@ static struct sock *scm_sock_alloc(struct net *net, struct socket *sock, int pro
 	sock_init_data(sock, sk);
 
 	sk->sk_destruct = xaprc00x_sock_destruct;
-	sk->sk_sndtimeo = PSOCK_SK_SND_TIMEO;
-	sk->sk_sndbuf = PSOCK_SK_BUFF_SIZE;
-	sk->sk_rcvbuf = PSOCK_SK_BUFF_SIZE;
+	sk->sk_sndtimeo = XAPRC00X_SK_SND_TIMEO;
+	sk->sk_sndbuf = XAPRC00X_SK_BUFF_SIZE;
+	sk->sk_rcvbuf = XAPRC00X_SK_BUFF_SIZE;
 
 	sock_reset_flag(sk, SOCK_ZAPPED);
 
@@ -273,10 +255,20 @@ static const struct net_proto_family xaprc00x_family_ops =
 };
 
 /**
+ * xaprc00x_register - Initializes the socket type and registers the calling
+ * proxy instance.
+ *
+ * @proxy_context A pointer to the SCM proxy instance
+ *
+ * Initializes SCM socket protocol and remembers a pointer to the proxys
+ * inst to send back whenver our driver calls the proxy.
+ *
+ * Returns: A pointer to the instance for this proxy.
+ *
+ * @notes
  * When the SCM socket is initialized it must have an instance of the proxy to
- * pass back when it makes calls. For now scm_proxy calls are hardcoded but
- * will eventually be migrated to a more flexible class of functors like struct
- * usb_function.
+ * pass back when it makes calls. This driver can only use one instance of the
+ * SCM proxy but the SCM proxy may have many instances.
  *
  * This function will be called by the SCM proxy when it is ready to transmit
  * data between this module and the USB device.
