@@ -980,7 +980,7 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 		proxy_inst->usb_context);
 
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
-	ret = ack.connect;
+	ret = ack.code;
 
 	kfree(packet);
 
@@ -1022,7 +1022,7 @@ int scm_proxy_open_socket(int *local_id, void *context)
 
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 
-	ret = ack.open.code;
+	ret = ack.code;
 	if (ret == 0)
 		*local_id = ack.open.sock_id;
 
