@@ -386,7 +386,7 @@ static int scm_bind(struct usb_configuration *c, struct usb_function *f)
 	if (ret)
 		goto fail;
 
-	/* Initialize the proxy and store it's instance so we can call it later */
+	/* Initialize the proxy and store it's instance for future calls */
 	scm->proxy_context = scm_proxy_init(scm);
 
 	DBG(cdev, "SCM bind complete at %s speed\n",
@@ -479,7 +479,7 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 	scm->req_in->complete = scm_send_msg_complete;
 
 	/* TODO use a better size than +64 */
-	scm->req_out = alloc_ep_req( scm->cmd_out, MAX_INT_PACKET_SIZE+64 );
+	scm->req_out = alloc_ep_req(scm->cmd_out, MAX_INT_PACKET_SIZE+64);
 	if (!scm->req_out) {
 		ERROR(cdev, "alloc_ep_req for req_out failed");
 		result = -ENOMEM;
@@ -507,6 +507,7 @@ exit:
 static void disable_scm(struct f_scm *scm)
 {
 	struct usb_composite_dev *cdev;
+
 	if (scm->cmd_in && scm->req_in)
 		free_ep_req(scm->cmd_in, scm->req_in);
 	scm->req_in = NULL;
@@ -649,14 +650,15 @@ module_exit(f_scm_exit);
 /* Handle USB listening and writing */
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
 {
-} 
+}
 static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 {
 	struct usb_request *req = scm_inst->req_in;
 	int ret;
-	if (!req) {
+
+	if (!req)
 		return;
-	}
+
 	req->buf = kmalloc(MAX_INT_PACKET_SIZE, GFP_ATOMIC);
 	memcpy(req->buf, data, len);
 	req->length = len;
@@ -667,37 +669,34 @@ static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 	struct f_scm *usb_context)
 {
-	/* Make sure the packet is big enough for the packet and payload
-	 * (checked in order to avoid reading bad memory) */
-	if(!packet || len < sizeof(*packet) || 
+	/**
+	 *Make sure the packet is big enough for the packet and payload
+	 * (checked in order to avoid reading bad memory)
+	 */
+	if (!packet || len < sizeof(*packet) ||
 		len < (sizeof(*packet)+packet->hdr.payload_len))
 		return;
 
 	/* Incoming command is either a close notificaiton or ACK */
 	switch (packet->hdr.opcode) {
 	case SCM_OP_ACK:
-		printk("scm_process_out_cmd ACK");
 		scm_proxy_recv_ack(packet, usb_context->proxy_context);
 		break;
 	case SCM_OP_CLOSE:
-		/* No current implementation */
-		printk("scm_process_out_cmd CLOSE");
-		break;
 	default:
-		printk("scm_process_out_cmd UNSUPPORTED");
 		break;
 	}
 }
 static void scm_read_out_cmd_cb(struct usb_ep *ep, struct usb_request *req)
 {
-	if (req->buf) {
+	if (req->buf)
 		scm_process_out_cmd(req->buf, req->actual, req->context);
-	}
 	scm_read_out_cmd(req->context);
 }
 static int scm_read_out_cmd(struct f_scm *scm_inst)
 {
 	struct usb_request *out_req = scm_inst->req_out;
+
 	out_req->length = sizeof(struct scm_packet) + 64;
 	out_req->buf = kmalloc(out_req->length, GFP_ATOMIC);
 	out_req->dma = 0;
@@ -705,7 +704,7 @@ static int scm_read_out_cmd(struct f_scm *scm_inst)
 	out_req->context = scm_inst;
 	usb_ep_queue(scm_inst->cmd_out, out_req, GFP_ATOMIC);
 
-	return 0;	
+	return 0;
 }
 
 
@@ -749,14 +748,13 @@ static struct scm_packet *ack_list_pop_by_id(int id,
 	/* Do not start looking if the list is being added to */
 
 	spin_lock_irqsave(&inst->ack_list_lock, flags);
-	list_for_each_safe(position, next, &inst->ack_list)
-	{
-		struct scm_packet_list_entry *entry = 
+	list_for_each_safe(position, next, &inst->ack_list) {
+		struct scm_packet_list_entry *entry =
 			list_entry(position, struct scm_packet_list_entry,
 				list_handle);
 		struct scm_packet *msg = entry->packet;
-		if (msg->hdr.msg_id == id)
-		{
+
+		if (msg->hdr.msg_id == id) {
 			list_del(&entry->list_handle);
 			ret = msg;
 			break;
@@ -781,12 +779,14 @@ static struct scm_packet *ack_list_pop_by_id(int id,
  * on timeout with no ACK received.
  *
  */
-static struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_inst* inst)
+static struct scm_payload_ack scm_proxy_wait_ack(int msg_id,
+	struct scm_proxy_inst *inst)
 {
 	struct scm_packet *ack;
-	struct scm_payload_ack ret = {.orig_opcode=0xFFFF};
+	struct scm_payload_ack ret = {.orig_opcode = 0xFFFF};
+
 	wait_event_timeout(inst->ack_wait_queue,
-		((ack = ack_list_pop_by_id(msg_id, inst))!=NULL),
+		((ack = ack_list_pop_by_id(msg_id, inst)) != NULL),
 		SCM_ACK_TIMEOUT);
 
 	/* If a packet came back free it and return the ACK portion */
@@ -808,6 +808,7 @@ static struct scm_payload_ack scm_proxy_wait_ack(int msg_id, struct scm_proxy_in
 static int scm_proxy_get_msg_id(struct scm_proxy_inst *proxy_context)
 {
 	int id;
+
 	mutex_lock(&proxy_context->scm_msg_id_mutex);
 	id = proxy_context->scm_msg_id++;
 	mutex_unlock(&proxy_context->scm_msg_id_mutex);
@@ -827,7 +828,7 @@ static int scm_proxy_get_msg_id(struct scm_proxy_inst *proxy_context)
 static void scm_proxy_assign_ip4(struct scm_packet *packet,
 	struct sockaddr *addr)
 {
-	struct sockaddr_in *ip4_addr = (struct sockaddr_in*) addr;
+	struct sockaddr_in *ip4_addr = (struct sockaddr_in *) addr;
 
 	packet->connect.addr.ip4.ip_addr = ip4_addr->sin_addr.s_addr;
 	packet->connect.port = ip4_addr->sin_port;
@@ -851,7 +852,7 @@ static void scm_proxy_assign_ip4(struct scm_packet *packet,
 static void scm_proxy_assign_ip6(struct scm_packet *packet,
 	struct sockaddr *addr)
 {
-	struct sockaddr_in6 *ip6_addr = (struct sockaddr_in6*) addr;
+	struct sockaddr_in6 *ip6_addr = (struct sockaddr_in6 *) addr;
 
 	memcpy(packet->connect.addr.ip6.ip_addr,
 		&ip6_addr->sin6_addr, sizeof(struct in6_addr));
@@ -868,7 +869,7 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 /* SCM Proxy API functions */
 
 /**
- * scm_proxy_recv_ack - Recieves an ACK message 
+ * scm_proxy_recv_ack - Recieves an ACK message
  *
  * @packet The packet to process
  * @context The SCM proxy context
@@ -881,11 +882,12 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 {
 	struct scm_packet_list_entry *entry;
 	struct scm_packet *new_packet;
+	struct scm_proxy_inst *proxy_inst;
 
-	new_packet = kmalloc(sizeof(*packet),GFP_ATOMIC);
+	new_packet = kmalloc(sizeof(*packet), GFP_ATOMIC);
 	if (!new_packet)
 		return;
-	memcpy(new_packet,packet,sizeof(*packet));
+	memcpy(new_packet, packet, sizeof(*packet));
 
 	entry = kmalloc(sizeof(struct scm_packet_list_entry),
 			GFP_ATOMIC);
@@ -894,7 +896,7 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 		return;
 	}
 
-	struct scm_proxy_inst * proxy_inst = inst;
+	proxy_inst = inst;
 	INIT_LIST_HEAD(&entry->list_handle);
 	entry->packet = new_packet;
 
@@ -954,9 +956,11 @@ EXPORT_SYMBOL_GPL(scm_proxy_init);
  * Returns: 0 on success or returned SCM error code.
  *
  */
-int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen, void *context)
+int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
+	void *context)
 {
-	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet),
+		GFP_KERNEL);
 	int ret;
 	struct scm_payload_ack ack;
 	struct scm_proxy_inst *proxy_inst;
@@ -966,9 +970,8 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen, void
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
 
-	if (addr->sa_family == AF_INET) {
+	if (addr->sa_family == AF_INET)
 		scm_proxy_assign_ip4(packet, addr);
-	}
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
 
@@ -999,7 +1002,8 @@ EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
  */
 int scm_proxy_open_socket(int *local_id, void *context)
 {
-	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_ATOMIC);
+	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet),
+		GFP_ATOMIC);
 	int ret;
 	struct scm_payload_ack ack;
 	struct scm_proxy_inst *proxy_inst;
@@ -1019,9 +1023,8 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
 
 	ret = ack.open.code;
-	if (ret == 0) {
+	if (ret == 0)
 		*local_id = ack.open.sock_id;
-	}
 
 	kfree(packet);
 	return ret;
@@ -1041,7 +1044,8 @@ EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 void scm_proxy_close_socket(int local_id, void *context)
 {
 	struct scm_packet *ack;
-	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet), GFP_KERNEL);
+	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet),
+		GFP_KERNEL);
 	struct scm_proxy_inst *proxy_inst;
 
 	proxy_inst = context;
@@ -1055,6 +1059,5 @@ void scm_proxy_close_socket(int local_id, void *context)
 
 	scm_proxy_wait_ack(packet->hdr.msg_id, context);
 	kfree(packet);
-	return;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_close_socket);

@@ -1,16 +1,16 @@
-/**
- * @file xscm.c
- * @brief A socket driver for Xaptums SCM implementation
- * @author Daniel Berliner
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * xscm.c -- A socket driver for Xaptums SCM implementation
+ *
+ * Copyright (C) 2018-2019 Xaptum, Inc.
  */
-
-#define XAPRC00X_SK_BUFF_SIZE 512
-#define XAPRC00X_SK_SND_TIMEO 1000
-
 #include <linux/module.h>
 #include <linux/net.h>
 #include <net/sock.h>
 #include <linux/xscm.h>
+
+#define XAPRC00X_SK_BUFF_SIZE 512
+#define XAPRC00X_SK_SND_TIMEO 1000
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
@@ -21,47 +21,41 @@ MODULE_VERSION("0.0.1");
 extern void scm_proxy_close_socket(int local_id, void *context);
 extern int scm_proxy_open_socket(int *local_id, void *context);
 extern int scm_proxy_connect_socket(int local_id, struct sockaddr *addr,
-	int alen, void * context);
+	int alen, void *context);
 extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
 
 /**
-* In addition to the Linux sock information we need to keep track of the local
-* ID given to us by the proxy
-*/
-struct xaprc00x_pinfo
-{
+ * In addition to the Linux sock information we need to keep track of the local
+ * ID given to us by the proxy
+ */
+struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
 };
 
+
 /* This socket driver may only be linked to one SCM proxy instance */
-static void *g_proxy_context = NULL;
+static void *g_proxy_context;
 
 /**
  * Function called for socket shutdown
  */
-static int xaprc00x_sock_shutdown(struct socket *sock, int how )
+static int xaprc00x_sock_shutdown(struct socket *sock, int how)
 {
 	struct sock *sk = sock->sk;
-        struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
-	
+	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
+
 	if (!sk)
-	{
 		return 0;
-	}
 
-	if (!sk->sk_shutdown) 
-	{
+	if (!sk->sk_shutdown)
 		sk->sk_shutdown = SHUTDOWN_MASK;
-	}
 
-	printk( KERN_INFO "xaprc00x_socket : socket shutdown :%d\n", psk->local_id );
-
-        scm_proxy_close_socket(psk->local_id, g_proxy_context);
+	scm_proxy_close_socket(psk->local_id, g_proxy_context);
 
 	release_sock(sk);
 
-	return 0;	
+	return 0;
 }
 
 
@@ -73,14 +67,10 @@ static int xaprc00x_sock_release(struct socket *sock)
 	struct sock *sk = sock->sk;
 	int err;
 
-	printk( KERN_INFO "xaprc00x_socket : releasing socket\n" );
-
-	if ( !sk ) 
-	{
+	if (!sk)
 		return 0;
-	}
 
-	err = xaprc00x_sock_shutdown(sock, 2 );
+	err = xaprc00x_sock_shutdown(sock, 2);
 
 	sock_orphan(sk);
 
@@ -93,28 +83,26 @@ static int xaprc00x_sock_release(struct socket *sock)
 /**
  * Function for connecting a socket
  */
-static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr, int alen, int flags )
-{	
+static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
+	int alen, int flags)
+{
 	int ret;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 
-	//printk( KERN_INFO "psock_socket : Connecting socket : %d\n", psk->local_id );
-
-	ret = scm_proxy_connect_socket(psk->local_id, addr, alen, g_proxy_context);
+	ret = scm_proxy_connect_socket(psk->local_id, addr, alen,
+		g_proxy_context);
 	return ret;
 }
 
 /**
  * Function for sending a msg over the socket
  */
-static int xaprc00x_sock_sendmsg( struct socket *sock,
-				 struct msghdr *msg, size_t len )
+static int xaprc00x_sock_sendmsg(struct socket *sock,
+				 struct msghdr *msg, size_t len)
 {
 	int res, r;
 	void *data = kmalloc(len, GFP_KERNEL);
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
-
-	//printk( KERN_INFO "scm sendmsg not supported %d\n", psk->local_id );
 
 	return 0;
 }
@@ -123,14 +111,12 @@ static int xaprc00x_sock_sendmsg( struct socket *sock,
  * Function for recv msg from the socket
  */
 static int xaprc00x_sock_recvmsg(struct socket *sock,
-				struct msghdr *msg, size_t size, int flags )
+				struct msghdr *msg, size_t size, int flags)
 {
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
 	char *buf = kmalloc(size, GFP_KERNEL);
 
-	//printk( KERN_INFO "scm recv not supported %d\n", psk->local_id );
-
-	kfree( buf );
+	kfree(buf);
 
 	return 0;
 }
@@ -139,17 +125,16 @@ static int xaprc00x_sock_recvmsg(struct socket *sock,
 /**
  * Bind an address to the socket
  */
-static int xaprc00x_sock_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
+static int xaprc00x_sock_bind(struct socket *sock, struct sockaddr *addr,
+	int addr_len)
 {
-	printk( KERN_INFO "xaprc00x_socket : bind not supported on psock socket\n" );
 	return 0;
 }
 
 /**
  * Operation definitions for the psock type
  */
-static const struct proto_ops xaprc00x_ops =
-{
+static const struct proto_ops xaprc00x_ops = {
 	.family		= PF_PSOCK,
 	.owner		= THIS_MODULE,
 	.release	= xaprc00x_sock_release,
@@ -157,7 +142,7 @@ static const struct proto_ops xaprc00x_ops =
 	.connect	= xaprc00x_sock_connect,
 	.listen		= NULL,
 	.accept		= NULL,
-	.getname 	= NULL, // xaprc00x_sock_getname,
+	.getname	= NULL,
 	.sendmsg	= xaprc00x_sock_sendmsg,
 	.recvmsg	= xaprc00x_sock_recvmsg,
 	.shutdown	= xaprc00x_sock_shutdown,
@@ -165,16 +150,14 @@ static const struct proto_ops xaprc00x_ops =
 	.getsockopt	= NULL,
 	.ioctl		= NULL,
 	.poll		= NULL,
-	.socketpair 	= sock_no_socketpair,
+	.socketpair	= sock_no_socketpair,
 	.mmap		= sock_no_mmap
-
 };
 
 /**
  * PSOCK proto definition
  */
-static struct proto xaprc00x_proto =
-{
+static struct proto xaprc00x_proto = {
 	.name = "SCM",
 	.owner = THIS_MODULE,
 	.obj_size = sizeof(struct xaprc00x_pinfo)
@@ -192,18 +175,15 @@ static void xaprc00x_sock_destruct(struct sock *sk)
 /**
  * Allocate socket data
  */
-static struct sock *scm_sock_alloc(struct net *net, struct socket *sock, int proto, gfp_t prio, int kern)
+static struct sock *scm_sock_alloc(struct net *net, struct socket *sock,
+	int proto, gfp_t prio, int kern)
 {
 	struct sock *sk;
 
-	sk = sk_alloc(net, PF_PSOCK, prio, &xaprc00x_proto , kern);
-
-	if ( !sk )
-	{
-		printk( KERN_ERR "psock_socket: Error allocating sk socket\n" );
+	sk = sk_alloc(net, PF_PSOCK, prio, &xaprc00x_proto, kern);
+	if (!sk)
 		goto exit;
-	}
-	
+
 	sock_init_data(sock, sk);
 
 	sk->sk_destruct = xaprc00x_sock_destruct;
@@ -214,15 +194,15 @@ static struct sock *scm_sock_alloc(struct net *net, struct socket *sock, int pro
 	sock_reset_flag(sk, SOCK_ZAPPED);
 
 	sk->sk_protocol = proto;
-//	sk->sk_state = BT_OPEN;
 exit:
 	return sk;
 }
 
 /**
- *  Create a socket for the psock type 
+ * Create a socket for the psock type
  */
-static int scm_sock_create(struct net *net, struct socket *sock, int protocol, int kern)
+static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
+	int kern)
 {
 	struct sock *sk;
 	struct xaprc00x_pinfo *psk;
@@ -232,23 +212,24 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol, i
 	sock->ops = &xaprc00x_ops;
 
 	sk = scm_sock_alloc(net, sock, protocol, GFP_ATOMIC, kern);
-	psk =  (struct xaprc00x_pinfo *)sk;
-	if (!sk)
-	{
-		printk( KERN_ERR "scm_proxy: ENOMEM when creating socket\n" );
-		return -ENOMEM;
+	if (!sk) {
+		pr_err("scm_proxy: ENOMEM when creating socket\n");
+		ret = -ENOMEM;
+		goto exit;
 	}
 
-	ret = scm_proxy_open_socket(&psk->local_id,g_proxy_context);
+	psk =  (struct xaprc00x_pinfo *) sk;
 
+	ret = scm_proxy_open_socket(&psk->local_id, g_proxy_context);
+
+exit:
 	return ret;
 }
 
 /**
  * Proto family definition
  */
-static const struct net_proto_family xaprc00x_family_ops = 
-{
+static const struct net_proto_family xaprc00x_family_ops = {
 	.family		= PF_PSOCK,
 	.owner		= THIS_MODULE,
 	.create		= scm_sock_create
@@ -280,16 +261,14 @@ int xaprc00x_register(void *proxy_context)
 	g_proxy_context = proxy_context;
 
 	err = proto_register(&xaprc00x_proto, 0);
-	if ( err < 0 )
-	{
-		printk(KERN_INFO "Error registering psock protocol\n");
+	if (err < 0) {
+		pr_debug("Error registering psock protocol");
 		goto error;
 	}
 
 	err = sock_register(&xaprc00x_family_ops);
-	if ( err < 0 )
-	{
-		printk(KERN_INFO "Error registering socket\n");
+	if (err < 0) {
+		pr_debug("Error registering socket");
 		goto error;
 	}
 
@@ -301,7 +280,7 @@ error:
 EXPORT_SYMBOL_GPL(xaprc00x_register);
 
 /**
- * Cleanup and unregister registred types 
+ * Cleanup and unregister registred types
  */
 static void __exit xaprc00x_cleanup_sockets(void)
 {

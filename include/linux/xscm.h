@@ -94,7 +94,7 @@ struct scm_payload_connect_ip4 {
 };
 
 union scm_payload_connect_ip_addr {
-	struct scm_payload_connect_ip6 ip6; 
+	struct scm_payload_connect_ip6 ip6;
 	struct scm_payload_connect_ip4 ip4;
 };
 
