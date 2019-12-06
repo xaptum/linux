@@ -258,23 +258,28 @@ int xaprc00x_register(void *proxy_context)
 {
 	int err;
 
+	if (g_proxy_context) {
+		err = -EEXIST;
+		goto exit;
+	}
 	g_proxy_context = proxy_context;
 
 	err = proto_register(&xaprc00x_proto, 0);
 	if (err < 0) {
 		pr_debug("Error registering psock protocol");
-		goto error;
+		goto clear_context;
 	}
 
 	err = sock_register(&xaprc00x_family_ops);
 	if (err < 0) {
 		pr_debug("Error registering socket");
-		goto error;
+		goto clear_context;
 	}
 
 	return 0;
-error:
+clear_context:
 	g_proxy_context = NULL;
+exit:
 	return err;
 }
 EXPORT_SYMBOL_GPL(xaprc00x_register);
@@ -286,7 +291,6 @@ static void __exit xaprc00x_cleanup_sockets(void)
 {
 	proto_unregister(&xaprc00x_proto);
 	sock_unregister(xaprc00x_family_ops.family);
-	g_proxy_context = NULL;
 }
 
 static int __init xaprc00x_init_sockets(void)
