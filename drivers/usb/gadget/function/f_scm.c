@@ -719,8 +719,7 @@ MODULE_VERSION("0.0.1");
 /* SCM Proxy internal functions */
 struct scm_proxy_inst {
 	void *usb_context;
-	__u8 scm_msg_id;
-	struct mutex scm_msg_id_mutex;
+	atomic_t scm_msg_id;
 	spinlock_t ack_list_lock;
 	struct wait_queue_head ack_wait_queue;
 	struct list_head ack_list;
@@ -807,11 +806,13 @@ static struct scm_payload_ack scm_proxy_wait_ack(int msg_id,
  */
 static int scm_proxy_get_msg_id(struct scm_proxy_inst *proxy_context)
 {
-	int id;
-
-	mutex_lock(&proxy_context->scm_msg_id_mutex);
-	id = proxy_context->scm_msg_id++;
-	mutex_unlock(&proxy_context->scm_msg_id_mutex);
+	__u16 id;
+	/*
+	 * Note: This operation is defined in the Kernel as 2s compliment
+	 * overflow (INT_MAX+1==INT_MIN) becuase the kernel uses
+	 * -fno-strict-overflow
+	 */
+	id = atomic_inc_return(&proxy_context->scm_msg_id);
 	return id;
 }
 
@@ -928,10 +929,8 @@ void *scm_proxy_init(void *usb_context)
 	proxy_inst = kzalloc(sizeof(struct scm_proxy_inst), GFP_KERNEL);
 	if (!proxy_inst)
 		return;
-	mutex_init(&proxy_inst->scm_msg_id_mutex);
 	init_waitqueue_head(&proxy_inst->ack_wait_queue);
 	proxy_inst->usb_context = usb_context;
-	proxy_inst->scm_msg_id = 0;
 
 	spin_lock_init(&proxy_inst->ack_list_lock);
 	INIT_LIST_HEAD(&proxy_inst->ack_list);
