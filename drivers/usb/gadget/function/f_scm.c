@@ -968,6 +968,7 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 
 	packet->hdr.opcode = SCM_OP_CONNECT;
 	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
+	packet->hdr.sock_id = local_id;
 
 	if (addr->sa_family == AF_INET)
 		scm_proxy_assign_ip4(packet, addr);
@@ -1051,6 +1052,7 @@ void scm_proxy_close_socket(int local_id, void *context)
 
 	packet->hdr.opcode = SCM_OP_CLOSE;
 	packet->hdr.msg_id = scm_proxy_get_msg_id(context);
+	packet->hdr.sock_id = local_id;
 	packet->hdr.payload_len = 0;
 
 	scm_send_msg(packet, sizeof(struct scm_packet_hdr),
