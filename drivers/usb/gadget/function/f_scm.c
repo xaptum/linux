@@ -13,6 +13,7 @@
 #include <linux/net.h>
 #include <net/sock.h>
 #include <linux/spinlock.h>
+
 #include "u_scm.h"
 #include "u_f.h"
 
@@ -53,10 +54,6 @@ struct f_scm {
 
 	void *proxy_context;
 };
-struct scm_packet_list_entry {
-	struct scm_packet *packet;
-	struct list_head list_handle;
-};
 
 /* Forward declarations */
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
@@ -64,7 +61,8 @@ static int scm_read_out_cmd(struct f_scm *scm_inst);
 
 /* Socket extern defs */
 extern int xaprc00x_register(void *proxy_context);
-
+extern void xaprc00x_sock_connect_ack(int sock_id, int status);
+extern void xaprc00x_sock_open_ack(struct scm_packet *ack);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -650,6 +648,7 @@ module_exit(f_scm_exit);
 /* Handle USB listening and writing */
 static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
 {
+	kfree(req->buf);
 }
 static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 {
@@ -721,80 +720,18 @@ struct scm_proxy_inst {
 	void *usb_context;
 	atomic_t scm_msg_id;
 	spinlock_t ack_list_lock;
-	struct wait_queue_head ack_wait_queue;
+	struct workqueue_struct *ack_wq;
 	struct list_head ack_list;
 };
 
-/**
- * ack_list_pop_by_id - Pops from the SCM proxy instances ACK list if found
- *
- * @id The message ID to look for
- * @context The SCM proxy context
- *
- * Performs an O(N) search of the proxys ACK list, removes the item (if found)
- * and returns either the found item or NULL
- *
- * Returns: A pointer to the found ACK packet or NULL
- *
- */
-static struct scm_packet *ack_list_pop_by_id(int id,
-	struct scm_proxy_inst *inst)
-{
-	unsigned long flags;
-	struct list_head *position = NULL;
-	struct list_head *next = NULL;
-	struct scm_packet *ret = NULL;
-	/* Do not start looking if the list is being added to */
+struct scm_proxy_work {
+	struct work_struct work;
+	void *proxy_context;
+	struct scm_packet *packet;
+};
 
-	spin_lock_irqsave(&inst->ack_list_lock, flags);
-	list_for_each_safe(position, next, &inst->ack_list) {
-		struct scm_packet_list_entry *entry =
-			list_entry(position, struct scm_packet_list_entry,
-				list_handle);
-		struct scm_packet *msg = entry->packet;
-
-		if (msg->hdr.msg_id == id) {
-			list_del(&entry->list_handle);
-			ret = msg;
-			break;
-		}
-	}
-	spin_unlock_irqrestore(&inst->ack_list_lock, flags);
-	return ret;
-}
-
-/**
- * scm_proxy_wait_ack - Waits for an ACK to be received for a message
- *
- * @msg_id The ID for the message being waited for
- * @usb_context The USB context to link with this proxy instance
- *
- * Initializes an instance of the SCM proxy to allow the SCM USB driver to talk
- * to the SCM network driver. The pointer returned by this function must be
- * passed to all other exported proxy functions as the "proxy context" to allow
- * the proxy to know which instance the operation is being performed on.
- *
- * Returns: The ACK data or an ACK packet with orig_opcode=SCM_OP_MAX (0xFFFF)
- * on timeout with no ACK received.
- *
- */
-static struct scm_payload_ack scm_proxy_wait_ack(int msg_id,
-	struct scm_proxy_inst *inst)
-{
-	struct scm_packet *ack;
-	struct scm_payload_ack ret = {.orig_opcode = 0xFFFF};
-
-	wait_event_timeout(inst->ack_wait_queue,
-		((ack = ack_list_pop_by_id(msg_id, inst)) != NULL),
-		SCM_ACK_TIMEOUT);
-
-	/* If a packet came back free it and return the ACK portion */
-	if (ack) {
-		ret = ack->ack;
-		kfree(ack);
-	}
-	return ret;
-}
+/* For naming the ACK workqueue */
+static atomic_t g_proxy_counter;
 
 /**
  * scm_proxy_get_msg_id - Gets a unique message ID for outgoing messages
@@ -867,8 +804,22 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 		sizeof(struct scm_payload_connect_ip6);
 }
 
-/* SCM Proxy API functions */
+static void xaprc00x_proxy_process_open_ack(struct work_struct *work)
+{
+	struct scm_proxy_work *work_data;
+	work_data = (struct scm_proxy_work *)work;
+	xaprc00x_sock_open_ack(work_data->packet);
+}
 
+static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
+{
+	struct scm_proxy_work *work_data;
+	work_data = (struct scm_proxy_work *)work;
+	xaprc00x_sock_connect_ack(work_data->packet->hdr.sock_id,
+		work_data->packet->ack.code);
+}
+
+/* SCM Proxy API functions */
 /**
  * scm_proxy_recv_ack - Recieves an ACK message
  *
@@ -881,31 +832,42 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
  */
 void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 {
-	struct scm_packet_list_entry *entry;
-	struct scm_packet *new_packet;
+	struct scm_proxy_work *new_work;
 	struct scm_proxy_inst *proxy_inst;
 
-	new_packet = kmalloc(sizeof(*packet), GFP_ATOMIC);
-	if (!new_packet)
+	/* The work item will be cleared at thend of the job */
+	new_work = kmalloc(sizeof(*new_work),GFP_ATOMIC);
+	if(!new_work)
 		return;
-	memcpy(new_packet, packet, sizeof(*packet));
+	new_work->proxy_context = inst;
 
-	entry = kmalloc(sizeof(struct scm_packet_list_entry),
-			GFP_ATOMIC);
-	if (!entry) {
-		kfree(new_packet);
+	/** 
+	 * This packet will be freed when the socket no longer needs it
+	 * which may be after the workqueue is done
+	 */
+	new_work->packet = kmalloc(packet->hdr.payload_len, GFP_ATOMIC);
+	if (!new_work->packet) {
+		kfree(new_work);
 		return;
 	}
+	memcpy(new_work->packet, packet, sizeof(*packet));
 
 	proxy_inst = inst;
-	INIT_LIST_HEAD(&entry->list_handle);
-	entry->packet = new_packet;
 
-	spin_lock(&(proxy_inst->ack_list_lock));
-	list_add(&proxy_inst->ack_list, &entry->list_handle);
-	spin_unlock(&(proxy_inst->ack_list_lock));
-
-	wake_up(&proxy_inst->ack_wait_queue);
+	/* Queue a work item to handle the incoming packet */
+	switch (packet->ack.orig_opcode) {
+	case SCM_OP_OPEN:
+		INIT_WORK(&new_work->work, xaprc00x_proxy_process_open_ack);
+		queue_work(proxy_inst->ack_wq, &new_work->work);
+		break;
+	case SCM_OP_CONNECT:
+		INIT_WORK(&new_work->work, xaprc00x_proxy_process_connect_ack);
+		queue_work(proxy_inst->ack_wq, &new_work->work);
+		break;
+	case SCM_OP_CLOSE: /* Device does not care if the host ACKs */
+	default:
+		break;
+	}
 }
 EXPORT_SYMBOL_GPL(scm_proxy_recv_ack);
 
@@ -926,11 +888,17 @@ void *scm_proxy_init(void *usb_context)
 {
 	struct scm_proxy_inst *proxy_inst;
 
+	/* Create a name that can contain the counter */
+	char scm_wq_name[sizeof("scm_wq_4294967296")];
+
 	proxy_inst = kzalloc(sizeof(struct scm_proxy_inst), GFP_KERNEL);
 	if (!proxy_inst)
-		return;
-	init_waitqueue_head(&proxy_inst->ack_wait_queue);
+		return NULL;
 	proxy_inst->usb_context = usb_context;
+
+	snprintf(scm_wq_name, sizeof(scm_wq_name), "scm_wq_%d",
+		atomic_inc_return(&proxy_inst->scm_msg_id));
+	proxy_inst->ack_wq = create_workqueue(scm_wq_name);
 
 	spin_lock_init(&proxy_inst->ack_list_lock);
 	INIT_LIST_HEAD(&proxy_inst->ack_list);
@@ -979,12 +947,9 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 		sizeof(struct scm_packet_hdr) + packet->hdr.payload_len,
 		proxy_inst->usb_context);
 
-	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
-	ret = ack.code;
-
 	kfree(packet);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 
@@ -1020,14 +985,7 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	scm_send_msg(packet, sizeof(struct scm_packet),
 		proxy_inst->usb_context);
 
-	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
-
-	ret = ack.code;
-	if (ret == 0)
-		*local_id = ack.open.sock_id;
-
-	kfree(packet);
-	return ret;
+	return packet->hdr.msg_id;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 
@@ -1058,7 +1016,6 @@ void scm_proxy_close_socket(int local_id, void *context)
 	scm_send_msg(packet, sizeof(struct scm_packet_hdr),
 		proxy_inst->usb_context);
 
-	scm_proxy_wait_ack(packet->hdr.msg_id, context);
 	kfree(packet);
 }
 EXPORT_SYMBOL_GPL(scm_proxy_close_socket);
