@@ -8,6 +8,7 @@
 #include <linux/net.h>
 #include <net/sock.h>
 #include <linux/xscm.h>
+#include <linux/rhashtable.h>
 
 #define XAPRC00X_SK_BUFF_SIZE 512
 #define XAPRC00X_SK_SND_TIMEO 1000
@@ -28,14 +29,33 @@ extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
  * In addition to the Linux sock information we need to keep track of the local
  * ID given to us by the proxy
  */
+enum xaprc00x_state {
+	SCM_UNOPEN=0, /* Initial state, unopened */
+	SCM_ESTABLISHED, /* Connection established */
+	SCM_SYN_SENT, /* Sent a connection request, waiting for ACK */
+	SCM_CLOSING, /* Our side has closed, waiting for host */
+	SCM_CLOSE_WAIT, /* Remote has shut down and is waiting for us */
+	SCM_CLOSE, /* Close has been completed */
+
+	SCM_STATE_MAX
+};
 struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
+	atomic_t		state; /* enum xaprc00x_state */
+	struct rhash_head hash;
 };
 
+static struct rhashtable_params ht_parms = {
+	.nelem_hint = 8,
+	.key_len = sizeof(int),
+	.key_offset = offsetof(struct xaprc00x_pinfo, local_id),
+	.head_offset = offsetof(struct xaprc00x_pinfo, hash),
+};
 
 /* This socket driver may only be linked to one SCM proxy instance */
 static void *g_proxy_context;
+static void g_scm_socket_table;
 
 /**
  * Function called for socket shutdown
@@ -83,6 +103,50 @@ static int xaprc00x_sock_release(struct socket *sock)
 /**
  * Function for connecting a socket
  */
+static void xaprc00x_def_write_space(struct sock *sk)
+{
+	struct socket_wq *wq;
+	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
+
+	printk("xaprc00x_def_write_space enter socket_id=%d\n",psk->psk.local_id);
+	wq = rcu_dereference(sk->sk_wq);
+	wake_up_interruptible_all(&wq->wait);
+	sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
+	printk("xaprc00x_def_write_space exit socket_id=%d\n",psk->psk.local_id);
+}
+
+static void xaprc00x_def_readable(struct sock *sk)
+{
+	struct socket_wq *wq;
+	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
+
+	printk("xaprc00x_def_readable enter socket_id=%d\n",psk->psk.local_id);
+	wq = rcu_dereference(sk->sk_wq);
+	wake_up_interruptible_sync_poll(&wq->wait, POLLIN | POLLPRI |
+		POLLRDNORM | POLLRDBAND);
+	sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
+	printk("xaprc00x_def_readable exit socket_id=%d\n",psk->psk.local_id);
+}
+static void xaprc00x_sock_connect_ack(int sock_id, int status)
+{
+	int new_status;
+	struct xaprc00x_pinfo *psk = ((struct xaprc00x_pinfo *)
+		xaprc00x_get_sock(sock_id))->sk;
+	if (status == 0) {
+		new_status = SCM_ESTABLISHED;
+	} else if(status == 1) {
+		/* TODO Handle this correcly. This is when connect fails */
+		new_status = SCM_CLOSE;
+	}
+	atomic_set(&psk->state, new_status);
+
+	/* Let poll know that we can write now */
+	psk->sk.sk_write_space = f_psock_def_write_space;
+	psk->sk.sk_data_ready =f_psock_def_readable;
+	psk->psk.can_write=1;
+	psk->sk.sk_write_space(&psk->sk);
+
+}
 static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 	int alen, int flags)
 {
@@ -91,6 +155,8 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 
 	ret = scm_proxy_connect_socket(psk->local_id, addr, alen,
 		g_proxy_context);
+	atomic_set(&psk->state, SCM_SYN_SENT);
+
 	return ret;
 }
 
@@ -131,6 +197,28 @@ static int xaprc00x_sock_bind(struct socket *sock, struct sockaddr *addr,
 	return 0;
 }
 
+static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
+	poll_table *wait)
+{
+	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
+	int pmask = 0;
+
+	sock_poll_wait(file, sk_sleep(sock->sk), wait);
+
+	/* Right now CONNECT is the only supported operation so WRITE will never be ready */
+	if (atomic_read(&psk->state) == SCM_ESTABLISHED) {
+		printk(KERN_INFO "xaprc00x_sock_poll: POLLOUT | POLLWRNORM | \
+			POLLWRBAND for socket_id=%d",
+			psk->local_id);
+		pmask |= POLLOUT | POLLWRNORM | POLLWRBAND;
+	} else {
+		printk(KERN_INFO "xaprc00x_sock_poll: 0 OUT for socket_id=%d",
+			psk->local_id);
+	}
+	return pmask;
+}
+
+
 /**
  * Operation definitions for the psock type
  */
@@ -149,7 +237,7 @@ static const struct proto_ops xaprc00x_ops = {
 	.setsockopt	= NULL,
 	.getsockopt	= NULL,
 	.ioctl		= NULL,
-	.poll		= NULL,
+	.poll		= xaprc00x_sock_poll,
 	.socketpair	= sock_no_socketpair,
 	.mmap		= sock_no_mmap
 };
@@ -198,6 +286,22 @@ exit:
 	return sk;
 }
 
+static void xaprc00x_sock_open_ack(int msg_id, int sock_id)
+{
+	int new_status;
+	struct xaprc00x_pinfo *psk = ((struct xaprc00x_pinfo *)
+		xaprc00x_get_sock(sock_id))->sk;
+
+	/* Reinsert the socket in the hash table with the new ID */
+	if (psk) {
+		psk->local_id = sock_id;
+
+		rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
+		rhashtable_lookup_insert_fast(&g_scm_socket_table,
+			&psk->hash, ht_parms);
+	}
+}
+
 /**
  * Create a socket for the psock type
  */
@@ -219,8 +323,24 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	}
 
 	psk =  (struct xaprc00x_pinfo *) sk;
+	psk->state = SCM_UNOPEN;
 
 	ret = scm_proxy_open_socket(&psk->local_id, g_proxy_context);
+
+	if (!ret) {
+		/*
+		 * Since we do not have a local ID we need some other unique
+		 * identifier. These can (but almost never will) conflict with
+		 * already opened sockets. This probably needs to be changed
+		 * back to it's original device centric ID creation now that
+		 * we instantiate everything. MSG ID N is almost always greater
+		 * than the largest opened sock. The only exception is on msg
+		 * ID wrap around.
+		 */
+		psk->local_id = ret;
+		rhashtable_lookup_insert_fast(&g_scm_socket_table,
+			&psk->hash, ht_parms);
+	}
 
 exit:
 	return ret;
@@ -284,6 +404,12 @@ exit:
 }
 EXPORT_SYMBOL_GPL(xaprc00x_register);
 
+struct sock *xaprc00x_get_sock(int key)
+{
+	return xaprc00x_get_socket(&key, &g_scm_socket_table);
+}
+EXPORT_SYMBOL_GPL(xaprc00x_get_sock);
+
 /**
  * Cleanup and unregister registred types
  */
@@ -291,10 +417,12 @@ static void __exit xaprc00x_cleanup_sockets(void)
 {
 	proto_unregister(&xaprc00x_proto);
 	sock_unregister(xaprc00x_family_ops.family);
+	rhashtable_destroy(&g_scm_socket_table);
 }
 
 static int __init xaprc00x_init_sockets(void)
 {
+	rhashtable_init(&g_scm_socket_table, &ht_parms);
 	return 0;
 }
 

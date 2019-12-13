@@ -763,6 +763,18 @@ static struct scm_packet *ack_list_pop_by_id(int id,
 	return ret;
 }
 
+static void scm_proxy_process_ack(struct scm_proxy_inst *inst, scm_packet *ack)
+{
+	switch (ack->ack.orig_opcode) {
+	case SCM_OP_OPEN:
+		xaprc00x_sock_open_ack(ack->hdr.sock_id, ack->ack.code);
+		break;
+	case SCM_OP_CONNECT:
+		xaprc00x_sock_connect_ack(ack->hdr.sock_id, ack->ack.code);
+		break;
+	}
+}
+
 /**
  * scm_proxy_wait_ack - Waits for an ACK to be received for a message
  *
@@ -778,8 +790,7 @@ static struct scm_packet *ack_list_pop_by_id(int id,
  * on timeout with no ACK received.
  *
  */
-static struct scm_payload_ack scm_proxy_wait_ack(int msg_id,
-	struct scm_proxy_inst *inst)
+static struct scm_payload_ack scm_proxy_wait_ack(struct scm_proxy_inst *inst)
 {
 	struct scm_packet *ack;
 	struct scm_payload_ack ret = {.orig_opcode = 0xFFFF};
@@ -791,6 +802,7 @@ static struct scm_payload_ack scm_proxy_wait_ack(int msg_id,
 	/* If a packet came back free it and return the ACK portion */
 	if (ack) {
 		ret = ack->ack;
+		printk("Found ACK with code %d", ack->ack.code);
 		kfree(ack);
 	}
 	return ret;
@@ -979,12 +991,9 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 		sizeof(struct scm_packet_hdr) + packet->hdr.payload_len,
 		proxy_inst->usb_context);
 
-	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
-	ret = ack.code;
-
 	kfree(packet);
 
-	return ret;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 
@@ -1020,14 +1029,15 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	scm_send_msg(packet, sizeof(struct scm_packet),
 		proxy_inst->usb_context);
 
+	/*
 	ack = scm_proxy_wait_ack(packet->hdr.msg_id, context);
-
 	ret = ack.code;
 	if (ret == 0)
 		*local_id = ack.open.sock_id;
+	*/
 
 	kfree(packet);
-	return ret;
+	return packet->hdr.msg_id;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 
