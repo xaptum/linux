@@ -43,6 +43,8 @@ struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
 	atomic_t		state; /* enum xaprc00x_state */
+	struct semaphore wait_sem;
+	struct scm_packet *wait_ack;
 	struct rhash_head hash;
 };
 
@@ -53,9 +55,11 @@ static struct rhashtable_params ht_parms = {
 	.head_offset = offsetof(struct xaprc00x_pinfo, hash),
 };
 
+struct sock *xaprc00x_get_sock(int key);
+
 /* This socket driver may only be linked to one SCM proxy instance */
 static void *g_proxy_context;
-static void g_scm_socket_table;
+struct rhashtable g_scm_socket_table;
 
 /**
  * Function called for socket shutdown
@@ -108,11 +112,11 @@ static void xaprc00x_def_write_space(struct sock *sk)
 	struct socket_wq *wq;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
 
-	printk("xaprc00x_def_write_space enter socket_id=%d\n",psk->psk.local_id);
+	printk("xaprc00x_def_write_space enter socket_id=%d\n",psk->local_id);
 	wq = rcu_dereference(sk->sk_wq);
 	wake_up_interruptible_all(&wq->wait);
 	sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
-	printk("xaprc00x_def_write_space exit socket_id=%d\n",psk->psk.local_id);
+	printk("xaprc00x_def_write_space exit socket_id=%d\n",psk->local_id);
 }
 
 static void xaprc00x_def_readable(struct sock *sk)
@@ -120,18 +124,18 @@ static void xaprc00x_def_readable(struct sock *sk)
 	struct socket_wq *wq;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
 
-	printk("xaprc00x_def_readable enter socket_id=%d\n",psk->psk.local_id);
+	printk("xaprc00x_def_readable enter socket_id=%d\n",psk->local_id);
 	wq = rcu_dereference(sk->sk_wq);
 	wake_up_interruptible_sync_poll(&wq->wait, POLLIN | POLLPRI |
 		POLLRDNORM | POLLRDBAND);
 	sk_wake_async(sk, SOCK_WAKE_WAITD, POLL_IN);
-	printk("xaprc00x_def_readable exit socket_id=%d\n",psk->psk.local_id);
+	printk("xaprc00x_def_readable exit socket_id=%d\n",psk->local_id);
 }
 static void xaprc00x_sock_connect_ack(int sock_id, int status)
 {
 	int new_status;
 	struct xaprc00x_pinfo *psk = ((struct xaprc00x_pinfo *)
-		xaprc00x_get_sock(sock_id))->sk;
+		xaprc00x_get_sock(sock_id));
 	if (status == 0) {
 		new_status = SCM_ESTABLISHED;
 	} else if(status == 1) {
@@ -141,12 +145,13 @@ static void xaprc00x_sock_connect_ack(int sock_id, int status)
 	atomic_set(&psk->state, new_status);
 
 	/* Let poll know that we can write now */
-	psk->sk.sk_write_space = f_psock_def_write_space;
-	psk->sk.sk_data_ready =f_psock_def_readable;
-	psk->psk.can_write=1;
+	psk->sk.sk_write_space = xaprc00x_def_write_space;
+	psk->sk.sk_data_ready =xaprc00x_def_readable;
 	psk->sk.sk_write_space(&psk->sk);
 
 }
+EXPORT_SYMBOL_GPL(xaprc00x_sock_connect_ack);
+
 static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 	int alen, int flags)
 {
@@ -200,7 +205,7 @@ static int xaprc00x_sock_bind(struct socket *sock, struct sockaddr *addr,
 static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
 	poll_table *wait)
 {
-	struct f_psock_pinfo *psk = (struct f_psock_pinfo *)sock->sk;
+	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock;
 	int pmask = 0;
 
 	sock_poll_wait(file, sk_sleep(sock->sk), wait);
@@ -288,9 +293,8 @@ exit:
 
 static void xaprc00x_sock_open_ack(int msg_id, int sock_id)
 {
-	int new_status;
 	struct xaprc00x_pinfo *psk = ((struct xaprc00x_pinfo *)
-		xaprc00x_get_sock(sock_id))->sk;
+		xaprc00x_get_sock(sock_id));
 
 	/* Reinsert the socket in the hash table with the new ID */
 	if (psk) {
@@ -301,6 +305,7 @@ static void xaprc00x_sock_open_ack(int msg_id, int sock_id)
 			&psk->hash, ht_parms);
 	}
 }
+EXPORT_SYMBOL_GPL(xaprc00x_sock_open_ack);
 
 /**
  * Create a socket for the psock type
@@ -323,24 +328,27 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	}
 
 	psk =  (struct xaprc00x_pinfo *) sk;
-	psk->state = SCM_UNOPEN;
+	atomic_set(&psk->state, SCM_UNOPEN);
 
-	ret = scm_proxy_open_socket(&psk->local_id, g_proxy_context);
+	sema_init(&psk->wait_sem, 0);
 
+	/* Send the OPEN command to the proxy */
+	scm_proxy_open_socket(&psk->local_id, g_proxy_context);
+
+	/* Block until we get an ACK */
+	down(&psk->wait_sem);
+
+	/* Handle the ack */
+	ret = psk->wait_ack->hdr.sock_id;
 	if (!ret) {
-		/*
-		 * Since we do not have a local ID we need some other unique
-		 * identifier. These can (but almost never will) conflict with
-		 * already opened sockets. This probably needs to be changed
-		 * back to it's original device centric ID creation now that
-		 * we instantiate everything. MSG ID N is almost always greater
-		 * than the largest opened sock. The only exception is on msg
-		 * ID wrap around.
-		 */
-		psk->local_id = ret;
+		psk->local_id = psk->wait_ack->hdr.sock_id;
 		rhashtable_lookup_insert_fast(&g_scm_socket_table,
 			&psk->hash, ht_parms);
 	}
+	
+	/* The proxy expects us to free the buffer */
+	kfree(psk->wait_ack);
+	psk->wait_ack = NULL;
 
 exit:
 	return ret;
@@ -354,6 +362,21 @@ static const struct net_proto_family xaprc00x_family_ops = {
 	.owner		= THIS_MODULE,
 	.create		= scm_sock_create
 };
+
+void xaprc00x_wake_up_ack(void *context, struct scm_packet *ack)
+{
+	struct xaprc00x_pinfo *psk = context;
+
+	/* This should never happen */
+	if(psk->wait_ack) {
+		pr_err("xaprc00x_wake_up_ack: Wake up requested during another ACK\n");
+		return;
+	}
+
+	psk->wait_ack = ack;
+	up(&psk->wait_sem);
+}
+EXPORT_SYMBOL_GPL(xaprc00x_wake_up_ack);
 
 /**
  * xaprc00x_register - Initializes the socket type and registers the calling
@@ -406,7 +429,7 @@ EXPORT_SYMBOL_GPL(xaprc00x_register);
 
 struct sock *xaprc00x_get_sock(int key)
 {
-	return xaprc00x_get_socket(&key, &g_scm_socket_table);
+	return rhashtable_lookup_fast(&g_scm_socket_table, &key,ht_parms);
 }
 EXPORT_SYMBOL_GPL(xaprc00x_get_sock);
 
