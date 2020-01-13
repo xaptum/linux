@@ -62,7 +62,7 @@ static int scm_read_out_cmd(struct f_scm *scm_inst);
 /* Socket extern defs */
 extern int xaprc00x_register(void *proxy_context);
 extern void xaprc00x_sock_connect_ack(int sock_id, int status);
-extern void xaprc00x_sock_open_ack(struct scm_packet *ack);
+extern void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -808,7 +808,8 @@ static void xaprc00x_proxy_process_open_ack(struct work_struct *work)
 {
 	struct scm_proxy_work *work_data;
 	work_data = (struct scm_proxy_work *)work;
-	xaprc00x_sock_open_ack(work_data->packet);
+	xaprc00x_sock_open_ack(work_data->packet->hdr.sock_id,
+		work_data->packet);
 }
 
 static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
@@ -956,7 +957,7 @@ EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
 /**
  * scm_proxy_open_socket - Open an SCM socket
  *
- * @local_id The ID of the socket to close
+ * @local_id The ID of the new socket
  * @context The SCM proxy context
  *
  * Sends a command to the device to open an SCM socket.
@@ -965,7 +966,7 @@ EXPORT_SYMBOL_GPL(scm_proxy_connect_socket);
  * local ID to *local_id
  *
  */
-int scm_proxy_open_socket(int *local_id, void *context)
+int scm_proxy_open_socket(int local_id, void *context)
 {
 	struct scm_packet *packet = kzalloc(sizeof(struct scm_packet),
 		GFP_ATOMIC);
@@ -981,11 +982,12 @@ int scm_proxy_open_socket(int *local_id, void *context)
 	packet->open.addr_family = SCM_FAM_IP;
 	packet->open.protocol = SCM_PROTO_TCP;
 	packet->open.type = SCM_TYPE_STREAM;
+	packet->open.handle = local_id;
 
 	scm_send_msg(packet, sizeof(struct scm_packet),
 		proxy_inst->usb_context);
 
-	return packet->hdr.msg_id;
+	return 0;
 }
 EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 

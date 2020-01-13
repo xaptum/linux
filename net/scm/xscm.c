@@ -61,6 +61,7 @@ struct sock *xaprc00x_get_sock(int key);
 /* This socket driver may only be linked to one SCM proxy instance */
 static void *g_proxy_context;
 struct rhashtable g_scm_socket_table;
+static atomic_t g_sock_id;
 
 /**
  * Function called for socket shutdown
@@ -332,30 +333,22 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 
 	sema_init(&psk->wait_sem, 0);
 
-	/* Send the OPEN command to the proxy */
-	tmp_id = scm_proxy_open_socket(&psk->local_id, g_proxy_context);
-
-	/* File the sock under the submitted ID */
-	/* This must finish before USB returns. Technically a race condition */
-	psk->local_id = tmp_id;
+	/* Create the socks entry in our table */
+	psk->local_id = atomic_inc_return(&g_sock_id);
 	rhashtable_lookup_insert_fast(&g_scm_socket_table,
 		&psk->hash, ht_parms);
+
+	/* Send the OPEN command to the proxy */
+	scm_proxy_open_socket(psk->local_id, g_proxy_context);
 
 	/* Block until we get an ACK */
 	down(&psk->wait_sem);
 
-	/* Remove the temp entry */
-	rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
 	/* Handle the ack and reinsert on success */
 	ret = psk->wait_ack->ack.code;
-	if (!ret) {
-		/**
-		 * There is an edge case where the msg ID is an open socket
-		 * but that requires a 32-bit value to wrap around
-		 */
-		psk->local_id = psk->wait_ack->ack.open.sock_id;
-		rhashtable_lookup_insert_fast(&g_scm_socket_table,
-			&psk->hash, ht_parms);
+	if (ret) {
+		pr_err("scm_proxy: Host failed OPEN with code %d", ret);
+		rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
 	}
 	
 	/* The proxy expects us to free the buffer */
@@ -375,26 +368,22 @@ static const struct net_proto_family xaprc00x_family_ops = {
 	.create		= scm_sock_create
 };
 
-void xaprc00x_sock_open_ack(struct scm_packet *ack)
+void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 {
 	struct xaprc00x_pinfo *pending_sock;
-	int sock_id;
-
-	if (ack->ack.orig_opcode == SCM_OP_OPEN)
-		sock_id = ack->hdr.msg_id;
-	else
-		sock_id = ack->hdr.sock_id;
 
 	pending_sock = (struct xaprc00x_pinfo*)
 		xaprc00x_get_sock(sock_id);
 
 	/* These should never happen */
 	if(!pending_sock) {
-		pr_err("xaprc00x_sock_open_ack: Sock not found\n");
+		pr_err("xaprc00x_sock_open_ack: Sock %d not found\n",
+			sock_id);
 		return;
 	}
 	if(pending_sock->wait_ack) {
-		pr_err("xaprc00x_sock_open_ack: Sock busy\n");
+		pr_err("xaprc00x_sock_open_ack: Sock %d busy\n",
+			sock_id);
 		return;
 	}
 

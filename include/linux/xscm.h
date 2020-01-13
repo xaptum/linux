@@ -63,6 +63,7 @@ struct scm_payload_data {
 };
 
 struct scm_payload_open {
+	__le32		handle;
 	enum scm_family	addr_family;
 	enum scm_proto	protocol;
 	enum scm_type	type;
@@ -72,7 +73,6 @@ struct scm_payload_ack {
 	enum scm_opcode		orig_opcode;
 	enum scm_error		code;
 	union {
-		struct { __u8 rsvd; __u32 sock_id; } open;
 		char	empty[0];
 	};
 };

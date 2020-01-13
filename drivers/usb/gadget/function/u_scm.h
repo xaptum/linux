@@ -19,7 +19,7 @@ void *scm_proxy_init(void *context);
 void scm_proxy_recv_ack(struct scm_packet *packet, void *context);
 int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 	void *context);
-int scm_proxy_open_socket(int *local_id, void *context);
+int scm_proxy_open_socket(int local_id, void *context);
 void scm_proxy_close_socket(int local_id, void *context);
 
 #endif
