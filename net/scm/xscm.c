@@ -159,13 +159,15 @@ static void xaprc00x_def_readable(struct sock *sk)
 /**
  * Funciton for handling a CONNECT ack
  */
-void xaprc00x_sock_connect_ack(int sock_id, int status)
+void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet)
 {
 	int new_status;
 	struct socket_wq *wq;
 	struct xaprc00x_pinfo *psk;
 	struct sock *sk;
+	int status;
 
+	status = packet->ack.code;
 	psk = (struct xaprc00x_pinfo *) xaprc00x_get_sock(sock_id);
 
 	/* This usually means the sock was shut down while in transit. */
@@ -196,7 +198,12 @@ void xaprc00x_sock_connect_ack(int sock_id, int status)
 	atomic_set(&psk->state, new_status);
 
 	/* Unblock the calling thread if it is waiting */
-	down_trylock(&psk->wait_sem);
+	/* Either pass the reponse packet to the waiting call or free it now */
+	if(down_trylock(&psk->wait_sem)) {
+		psk->wait_ack = packet;
+	} else {
+		kfree(packet);
+	}
 	up(&psk->wait_sem);
 
 }
@@ -220,13 +227,20 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 	else if (state == SCM_ESTABLISHED)
 		ret = -EISCONN;
 	else {
-		ret = scm_proxy_connect_socket(psk->local_id, addr, alen,
+		scm_proxy_connect_socket(psk->local_id, addr, alen,
 			g_proxy_context);
 		atomic_set(&psk->state, SCM_SYN_SENT);
 
 		/* Block for ACK if nonblock isn't set */
-		if (!(flags & SOCK_NONBLOCK))
+		if (!(flags & SOCK_NONBLOCK)) {
 			down(&psk->wait_sem);
+
+			ret = psk->wait_ack->ack.code;
+
+			/* The proxy expects us to free the buffer */
+			kfree(psk->wait_ack);
+			psk->wait_ack = NULL;
+		}
 	}
 
 	return ret;

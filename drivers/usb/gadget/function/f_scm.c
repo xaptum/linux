@@ -61,7 +61,7 @@ static int scm_read_out_cmd(struct f_scm *scm_inst);
 
 /* Socket extern defs */
 extern int xaprc00x_register(void *proxy_context);
-extern void xaprc00x_sock_connect_ack(int sock_id, int status);
+extern void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet);
 extern void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
 extern int xaprc00x_sock_handle_shutdown(int sock_id);
 
@@ -814,6 +814,7 @@ static void xaprc00x_proxy_process_open_ack(struct work_struct *work)
 	work_data = (struct scm_proxy_work *)work;
 	xaprc00x_sock_open_ack(work_data->packet->hdr.sock_id,
 		work_data->packet);
+	kfree(work);
 }
 
 static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
@@ -822,7 +823,8 @@ static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
 
 	work_data = (struct scm_proxy_work *)work;
 	xaprc00x_sock_connect_ack(work_data->packet->hdr.sock_id,
-		work_data->packet->ack.code);
+		work_data->packet);
+	kfree(work);
 }
 
 static void xaprc00x_proxy_process_close(struct work_struct *work)
@@ -862,7 +864,7 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 	 * This packet will be freed when the socket no longer needs it
 	 * which may be after the workqueue is done
 	 */
-	new_work->packet = kmalloc(packet->hdr.payload_len, GFP_ATOMIC);
+	new_work->packet = kmalloc(sizeof(*packet), GFP_ATOMIC);
 	if (!new_work->packet) {
 		kfree(new_work);
 		return;
