@@ -8,6 +8,7 @@
 #include <linux/net.h>
 #include <net/sock.h>
 #include <linux/xscm.h>
+#include "xscm_extern.h"
 #include <linux/rhashtable.h>
 
 #define XAPRC00X_SK_BUFF_SIZE 512
@@ -17,13 +18,6 @@ MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
 MODULE_DESCRIPTION("SCM Socket Driver");
 MODULE_VERSION("0.0.1");
-
-/* SCM Proxy external defs */
-extern void scm_proxy_close_socket(int local_id, void *context);
-extern int scm_proxy_open_socket(int *local_id, void *context);
-extern int scm_proxy_connect_socket(int local_id, struct sockaddr *addr,
-	int alen, void *context);
-extern void scm_proxy_wait_ack(struct scm_packet **packet, int msg_id);
 
 /**
  * In addition to the Linux sock information we need to keep track of the local
@@ -146,8 +140,8 @@ void xaprc00x_sock_connect_ack(int sock_id, int status)
 
 	/* This usually means the sock was shut down while in transit. */
 	if (!psk) {
-		pr_err("xaprc00x_sock_connect_ack: Socket %d not found\n",
-			sock_id);
+		pr_err("%s: Socket %d not found",
+			__func__, sock_id);
 		return;
 	}
 
@@ -158,7 +152,7 @@ void xaprc00x_sock_connect_ack(int sock_id, int status)
 
 		/* Let poll know that we can write now */
 		sk->sk_write_space = xaprc00x_def_write_space;
-		sk->sk_data_ready =xaprc00x_def_readable;
+		sk->sk_data_ready = xaprc00x_def_readable;
 		sk->sk_write_space(&psk->sk);
 	} else {
 		new_status = SCM_CLOSE;
@@ -185,10 +179,13 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 	int alen, int flags)
 {
 	int ret;
-	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sock->sk;
+	struct xaprc00x_pinfo *psk;
 	int state;
 
-	if ((state=atomic_read(&psk->state)) == SCM_SYN_SENT)
+	psk = (struct xaprc00x_pinfo *)sock->sk;
+	state = atomic_read(&psk->state);
+
+	if (state == SCM_SYN_SENT)
 		ret = -EALREADY;
 	else if (state == SCM_ESTABLISHED)
 		ret = -EISCONN;
@@ -226,15 +223,15 @@ static int xaprc00x_sock_recvmsg(struct socket *sock,
 static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
 	poll_table *wait)
 {
-
 	struct xaprc00x_pinfo *psk;
-	psk = (struct xaprc00x_pinfo *)sock->sk;
+	unsigned int mask;
 
-	unsigned int mask = 0;
+	psk = (struct xaprc00x_pinfo *)sock->sk;
+	mask = 0;
 
 	sock_poll_wait(file, sk_sleep(sock->sk), wait);
 
-	/* Right now CONNECT is the only supported operation so WRITE will never be ready */
+	/* Connected sockets are always writable */
 	if (atomic_read(&psk->state) == SCM_ESTABLISHED)
 		mask |= POLLOUT | POLLWRNORM | POLLWRBAND;
 
@@ -348,9 +345,10 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	ret = psk->wait_ack->ack.code;
 	if (ret) {
 		pr_err("scm_proxy: Host failed OPEN with code %d", ret);
-		rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
+		rhashtable_remove_fast(&g_scm_socket_table, &psk->hash,
+			ht_parms);
 	}
-	
+
 	/* The proxy expects us to free the buffer */
 	kfree(psk->wait_ack);
 	psk->wait_ack = NULL;
@@ -372,18 +370,18 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 {
 	struct xaprc00x_pinfo *pending_sock;
 
-	pending_sock = (struct xaprc00x_pinfo*)
+	pending_sock = (struct xaprc00x_pinfo *)
 		xaprc00x_get_sock(sock_id);
 
 	/* These should never happen */
-	if(!pending_sock) {
-		pr_err("xaprc00x_sock_open_ack: Sock %d not found\n",
-			sock_id);
+	if (!pending_sock) {
+		pr_err("%s: Sock %d not found\n",
+			__func__, sock_id);
 		return;
 	}
-	if(pending_sock->wait_ack) {
-		pr_err("xaprc00x_sock_open_ack: Sock %d busy\n",
-			sock_id);
+	if (pending_sock->wait_ack) {
+		pr_err("%s: Sock %d busy\n",
+			__func__, sock_id);
 		return;
 	}
 

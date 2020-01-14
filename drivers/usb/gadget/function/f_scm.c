@@ -807,6 +807,7 @@ static void scm_proxy_assign_ip6(struct scm_packet *packet,
 static void xaprc00x_proxy_process_open_ack(struct work_struct *work)
 {
 	struct scm_proxy_work *work_data;
+
 	work_data = (struct scm_proxy_work *)work;
 	xaprc00x_sock_open_ack(work_data->packet->hdr.sock_id,
 		work_data->packet);
@@ -815,6 +816,7 @@ static void xaprc00x_proxy_process_open_ack(struct work_struct *work)
 static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
 {
 	struct scm_proxy_work *work_data;
+
 	work_data = (struct scm_proxy_work *)work;
 	xaprc00x_sock_connect_ack(work_data->packet->hdr.sock_id,
 		work_data->packet->ack.code);
@@ -837,12 +839,12 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 	struct scm_proxy_inst *proxy_inst;
 
 	/* The work item will be cleared at thend of the job */
-	new_work = kmalloc(sizeof(*new_work),GFP_ATOMIC);
-	if(!new_work)
+	new_work = kmalloc(sizeof(*new_work), GFP_ATOMIC);
+	if (!new_work)
 		return;
 	new_work->proxy_context = inst;
 
-	/** 
+	/**
 	 * This packet will be freed when the socket no longer needs it
 	 * which may be after the workqueue is done
 	 */
