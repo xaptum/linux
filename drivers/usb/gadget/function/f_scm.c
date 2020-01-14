@@ -63,6 +63,8 @@ static int scm_read_out_cmd(struct f_scm *scm_inst);
 extern int xaprc00x_register(void *proxy_context);
 extern void xaprc00x_sock_connect_ack(int sock_id, int status);
 extern void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
+extern int xaprc00x_sock_handle_shutdown(int sock_id);
+
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -682,6 +684,7 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 		scm_proxy_recv_ack(packet, usb_context->proxy_context);
 		break;
 	case SCM_OP_CLOSE:
+		scm_proxy_recv_close(packet, usb_context->proxy_context);
 	default:
 		break;
 	}
@@ -822,6 +825,17 @@ static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
 		work_data->packet->ack.code);
 }
 
+static void xaprc00x_proxy_process_close(struct work_struct *work)
+{
+	struct scm_proxy_work *work_data;
+
+	work_data = (struct scm_proxy_work *)work;
+	xaprc00x_sock_handle_shutdown(work_data->packet->hdr.sock_id);
+	/* Freed here becuase the handler has no use for the packet */
+	kfree(work_data->packet);
+	kfree(work_data);
+}
+
 /* SCM Proxy API functions */
 /**
  * scm_proxy_recv_ack - Recieves an ACK message
@@ -869,11 +883,49 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 		break;
 	case SCM_OP_CLOSE: /* Device does not care if the host ACKs */
 	default:
+		kfree(new_work->packet);
+		kfree(new_work);
 		break;
 	}
 }
 EXPORT_SYMBOL_GPL(scm_proxy_recv_ack);
 
+/**
+ * scm_proxy_recv_close - Recieves an CLOSE message
+ *
+ * @packet The packet to process
+ * @context The SCM proxy context
+ *
+ * Processes an SCM CLOSE packet. The `packet` parameter may be modified or
+ * free'd after this functions returns.
+ *
+ */
+void scm_proxy_recv_close(struct scm_packet *packet, void *inst)
+{
+	struct scm_proxy_work *new_work;
+	struct scm_proxy_inst *proxy_inst;
+
+	/* The work item will be cleared at thend of the job */
+	new_work = kmalloc(sizeof(*new_work), GFP_ATOMIC);
+	if (!new_work)
+		return;
+	new_work->proxy_context = inst;
+
+	/* CLOSE does not have any fields */
+	new_work->packet = kmalloc(sizeof(*packet), GFP_ATOMIC);
+	if (!new_work->packet) {
+		kfree(new_work);
+		return;
+	}
+	memcpy(new_work->packet, packet, sizeof(*packet));
+
+	proxy_inst = inst;
+
+	/* Queue a work item to handle the incoming packet */
+	INIT_WORK(&new_work->work, xaprc00x_proxy_process_close);
+	queue_work(proxy_inst->ack_wq, &new_work->work);
+}
+EXPORT_SYMBOL_GPL(scm_proxy_recv_close);
 /**
  * scm_proxy_init - Initializes an instance of the SCM proxy
  *
@@ -995,7 +1047,7 @@ EXPORT_SYMBOL_GPL(scm_proxy_open_socket);
 
 
 /**
- * scm_proxy_close_socket - Close a SCM socket
+ * scm_proxy_close_socket - Close a SCM socket on the host
  *
  * @local_id The ID of the socket to close
  * @context The SCM proxy context

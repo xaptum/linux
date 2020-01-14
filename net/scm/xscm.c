@@ -58,28 +58,58 @@ struct rhashtable g_scm_socket_table;
 static atomic_t g_sock_id;
 
 /**
- * Function called for socket shutdown
+ * Handles internal socket closing procedures by removing the sock from the
+ * internal lookup table and closing the socket on the Linux side.
  */
-static int xaprc00x_sock_shutdown(struct socket *sock, int how)
+static void xaprc00x_sock_shutdown_internal(struct sock *sk)
 {
-	struct sock *sk = sock->sk;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
-
-	if (!sk)
-		return 0;
 
 	if (!sk->sk_shutdown)
 		sk->sk_shutdown = SHUTDOWN_MASK;
 
 	rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
 
-	scm_proxy_close_socket(psk->local_id, g_proxy_context);
-
 	release_sock(sk);
+}
+
+/**
+ * Function called for socket shutdown
+ */
+static int xaprc00x_sock_shutdown(struct socket *socket, int how)
+{
+	struct sock *sk = socket->sk;
+	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
+	int local_id;
+
+	if (!sk)
+		return 0;
+
+	local_id = psk->local_id;
+
+	xaprc00x_sock_shutdown_internal(sk);
+
+	scm_proxy_close_socket(local_id, g_proxy_context);
 
 	return 0;
 }
 
+/**
+ * For the proxy to call when the host initiated a close
+ * This function will not send anything to the host becuase the sock is already
+ * closed and the caller of this function is responsible for sending the ACK.
+ */
+int xaprc00x_sock_handle_shutdown(int sock_id)
+{
+	struct sock *sk;
+	struct xaprc00x_pinfo *psk;
+
+	sk = xaprc00x_get_sock(sock_id);
+	psk = (struct xaprc00x_pinfo *) sk;
+
+	xaprc00x_sock_shutdown_internal(sk);
+}
+EXPORT_SYMBOL_GPL(xaprc00x_sock_handle_shutdown);
 
 /**
  * Function called when releasing a socket
