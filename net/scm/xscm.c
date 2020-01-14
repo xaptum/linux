@@ -37,7 +37,6 @@ struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
 	atomic_t		state; /* enum xaprc00x_state */
-	__u8			so_error;
 	struct semaphore wait_sem;
 	struct scm_packet *wait_ack;
 	struct rhash_head hash;
@@ -194,7 +193,6 @@ void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet)
 		sk_wake_async(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	}
 
-	psk->so_error = 0xFF & status;
 	atomic_set(&psk->state, new_status);
 
 	/* Unblock the calling thread if it is waiting */
