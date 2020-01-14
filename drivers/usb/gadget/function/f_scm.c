@@ -954,7 +954,7 @@ void *scm_proxy_init(void *usb_context)
 	proxy_inst->usb_context = usb_context;
 
 	snprintf(scm_wq_name, sizeof(scm_wq_name), "scm_wq_%d",
-		atomic_inc_return(&proxy_inst->scm_msg_id));
+		atomic_inc_return(&g_proxy_counter));
 	proxy_inst->ack_wq = create_workqueue(scm_wq_name);
 
 	spin_lock_init(&proxy_inst->ack_list_lock);
