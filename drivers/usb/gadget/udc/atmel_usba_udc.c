@@ -488,9 +488,11 @@ static void submit_request(struct usba_ep *ep, struct usba_request *req)
 		next_fifo_transaction(ep, req);
 		if (req->last_transaction) {
 			usba_ep_writel(ep, CTL_DIS, USBA_TX_PK_RDY);
-			usba_ep_writel(ep, CTL_ENB, USBA_TX_COMPLETE);
+			if (ep_is_control(ep))
+				usba_ep_writel(ep, CTL_ENB, USBA_TX_COMPLETE);
 		} else {
-			usba_ep_writel(ep, CTL_DIS, USBA_TX_COMPLETE);
+			if (ep_is_control(ep))
+				usba_ep_writel(ep, CTL_DIS, USBA_TX_COMPLETE);
 			usba_ep_writel(ep, CTL_ENB, USBA_TX_PK_RDY);
 		}
 	}
@@ -2176,7 +2178,7 @@ static struct usba_ep * atmel_udc_of_init(struct platform_device *pdev,
 		ep->ep.caps.dir_in = true;
 		ep->ep.caps.dir_out = true;
 
-		// if (fifo_mode != 0) {
+		if (fifo_mode != 0) {
 			/*
 			 * Generate ept_cfg based on FIFO size and
 			 * banks number
@@ -2189,7 +2191,7 @@ static struct usba_ep * atmel_udc_of_init(struct platform_device *pdev,
 				  USBA_BF(EPT_SIZE, fls(ep->fifo_size - 1) - 3);
 
 			ep->ept_cfg |= USBA_BF(BK_NUMBER, ep->nr_banks);
-		// }
+		}
 
 		if (i)
 			list_add_tail(&ep->ep.ep_list, &udc->gadget.ep_list);
