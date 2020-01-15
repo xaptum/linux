@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0+
-/*
+/**
  * xscm.c -- A socket driver for Xaptums SCM implementation
  *
  * Copyright (C) 2018-2019 Xaptum, Inc.
  */
 #include <linux/module.h>
 #include <linux/net.h>
-#include <net/sock.h>
 #include <linux/xscm.h>
 #include <linux/rhashtable.h>
 #include <linux/sched/signal.h>
+#include <net/sock.h>
 
 #include "xscm_extern.h"
 #define XAPRC00X_SK_BUFF_SIZE 512
@@ -25,20 +25,27 @@ MODULE_VERSION("0.0.1");
  * ID given to us by the proxy
  */
 enum xaprc00x_state {
-	SCM_UNOPEN=0, /* Initial state, unopened */
+	SCM_UNOPEN = 0, /* Initial state, unopened */
 	SCM_ESTABLISHED, /* Connection established */
 	SCM_SYN_SENT, /* Sent a connection request, waiting for ACK */
-	SCM_SYN_RECV, /* A connection request has been responded to but not processed */
+	/* A connection request has been responded to but not processed */
+	SCM_SYN_RECV,
 	SCM_CLOSING, /* Our side has closed, waiting for host */
 	SCM_CLOSE_WAIT, /* Remote has shut down and is waiting for us */
 	SCM_CLOSE, /* Close has been completed or open is in flight */
 
 	SCM_STATE_MAX
 };
+
 struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
 	atomic_t		state; /* enum xaprc00x_state */
+	__u8			so_error;
+	char			*read_cache;
+	size_t			read_cache_offset;
+	size_t			read_cache_bytes_used;
+	size_t			read_cache_size;
 	struct scm_packet *wait_ack;
 	struct rhash_head hash;
 };
@@ -50,6 +57,7 @@ static struct rhashtable_params ht_parms = {
 	.head_offset = offsetof(struct xaprc00x_pinfo, hash),
 };
 
+/* Forward Declarations */
 struct sock *xaprc00x_get_sock(int key);
 
 /* This socket driver may only be linked to one SCM proxy instance */
@@ -58,79 +66,100 @@ struct rhashtable g_scm_socket_table;
 static atomic_t g_sock_id;
 
 /**
- * Handles internal socket closing procedures by removing the sock from the
- * internal lookup table and closing the socket on the Linux side.
+ * Closes the socket on the device side.
  */
-static void xaprc00x_sock_shutdown_internal(struct sock *sk)
+static void xaprc00x_sock_side_shutdown_internal(struct sock *sk, int how)
 {
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
 
-	if (!sk->sk_shutdown)
-		sk->sk_shutdown = SHUTDOWN_MASK;
+	lock_sock(sk);
+	sk->sk_shutdown |= how;
 
-	rhashtable_remove_fast(&g_scm_socket_table, &psk->hash, ht_parms);
-
+	/**
+	 * Note: This is mostly legacy since sendmsg and recvmsg only use
+	 * sk_shutdown flags. Removal of psk->state is likely in future
+	 * releases.
+	 */
+	atomic_set(&psk->state, SCM_CLOSE);
+	sk->sk_state_change(sk);
 	release_sock(sk);
 }
 
 /**
- * Function called for socket shutdown
+ * When the device initiates a shutdown it performs the internal tasks and
+ * sends a command to the host.
  */
-static int xaprc00x_sock_shutdown(struct socket *socket, int how)
+static int xaprc00x_sock_side_shutdown(struct socket *socket, int how)
 {
 	struct sock *sk = socket->sk;
 	struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
 	int local_id;
 
-	if (!sk)
-		return 0;
+	/**
+	 * maps 0->1 has the advantage of making bit 1 rcvs and
+	 * 1->2 bit 2 snds.
+	 * 2->3
+	 */
+	how++;
+	if ((how & ~SHUTDOWN_MASK) || !how) /* MAXINT->0 */
+		return -EINVAL;
 
-	local_id = psk->local_id;
+	xaprc00x_sock_side_shutdown_internal(sk, how);
 
-	xaprc00x_sock_shutdown_internal(sk);
-
-	scm_proxy_close_socket(local_id, g_proxy_context);
-
+	/* Send shutdown to peer */
+	scm_proxy_close_socket(psk->local_id, g_proxy_context);
 	return 0;
 }
 
 /**
- * For the proxy to call when the host initiated a close
- * This function will not send anything to the host becuase the sock is already
- * closed and the caller of this function is responsible for sending the ACK.
+ * For the proxy to run when a shutdown is received from the host.
  */
-int xaprc00x_sock_handle_shutdown(int sock_id)
+int xaprc00x_sock_handle_host_side_shutdown(int sock_id, int how)
 {
 	struct sock *sk;
-	struct xaprc00x_pinfo *psk;
+
+	/**
+	 * maps 0->1 has the advantage of making bit 1 rcvs and
+	 * 1->2 bit 2 snds.
+	 * 2->3
+	 */
+	how++;
+	if ((how & ~SHUTDOWN_MASK) || !how) /* MAXINT->0 */
+		return -EINVAL;
 
 	sk = xaprc00x_get_sock(sock_id);
-	psk = (struct xaprc00x_pinfo *) sk;
+	if (sk)
+		xaprc00x_sock_side_shutdown_internal(sk, how);
 
-	xaprc00x_sock_shutdown_internal(sk);
 	return 0;
 }
-EXPORT_SYMBOL_GPL(xaprc00x_sock_handle_shutdown);
+EXPORT_SYMBOL_GPL(xaprc00x_sock_handle_host_side_shutdown);
 
-/**
- * Function called when releasing a socket
- */
-static int xaprc00x_sock_release(struct socket *sock)
+static int xaprc00x_sock_side_release(struct socket *sock)
 {
 	struct sock *sk = sock->sk;
-	int err;
 
-	if (!sk)
-		return 0;
+	if (sk) {
+		struct xaprc00x_pinfo *psk = (struct xaprc00x_pinfo *)sk;
 
-	err = xaprc00x_sock_shutdown(sock, 2);
+		lock_sock(sk);
 
-	sock_orphan(sk);
+		rhashtable_remove_fast(&g_scm_socket_table, &psk->hash,
+				       ht_parms);
+		sock->sk = NULL;
+		sk->sk_shutdown = SHUTDOWN_MASK;
+		sk->sk_state_change(sk);
+		sock_orphan(sk);
 
-	sock_set_flag(sk, SOCK_DEAD);
-	sock_put(sk);
+		release_sock(sk);
 
-	return err;
+		sock_put(sk);
+	} else {
+		pr_err("%s: Given sock->sk==NULL. Hash table corruption "
+			"possible.", __func__);
+	}
+
+	return 0;
 }
 
 /**
@@ -167,8 +196,7 @@ void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet)
 	struct sock *sk;
 
 	sk = xaprc00x_get_sock(sock_id);
-	psk = (struct xaprc00x_pinfo *) sk;
-	wq = rcu_dereference(sk->sk_wq);
+	psk = (struct xaprc00x_pinfo *)sk;
 
 	/* This usually means the sock was shut down while in transit. */
 	if (!psk) {
@@ -176,6 +204,8 @@ void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet)
 			__func__, sock_id);
 		return;
 	}
+	
+	wq = rcu_dereference(sk->sk_wq);
 
 	/* Let the sock know we got a response */
 	psk->wait_ack = packet;
@@ -188,7 +218,7 @@ static long xaprc00x_wait_for_connect(struct sock *sk, long timeo)
 {
 	struct xaprc00x_pinfo *psk;
 
-	psk = (struct xaprc00x_pinfo *) sk;
+	psk = (struct xaprc00x_pinfo *)sk;
 
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	add_wait_queue(sk_sleep(sk), &wait);
@@ -205,6 +235,107 @@ static long xaprc00x_wait_for_connect(struct sock *sk, long timeo)
 	remove_wait_queue(sk_sleep(sk), &wait);
 	return timeo;
 }
+
+/**
+ * xaprc00x_realloc_shift - Reallocs a buffer but only copies part of the data
+ *
+ * @p A pointer to the location of the memory to be reallocated
+ * @new_size The minimum size for the new buffer
+ * @flags Flags to pass to kmalloc
+ * @copy_start The offset to apply when copying the old data
+ * @copy_len The number of bytes to copy to the new buffer
+ *
+ * This function uses kmalloc and free to act like krealloc, except instead of
+ * copying the entire buffer over to the new memory, only a single continuous
+ * segment of data is taken. This data can start anywhere in the buffer and can
+ * be any length.
+ *
+ * Returns: The new length of the buffer
+ *
+ * @notes
+ * This function may generate a segment violation if copy_start+copy_len
+ * exceeds the length of the original buffer.
+ *
+ * This function will cause undefined behavior if *p is not a block of memory
+ * defined by the kmalloc family of functions.
+ *
+ * This function will round new_size up to the nearest power of 2 when
+ * selecting a new buffer size.
+ */
+static size_t xaprc00x_realloc_shift(void **p, size_t new_size, gfp_t flags,
+	size_t copy_start, size_t copy_len)
+{
+	char *new_mem = kmalloc(new_size, flags);
+
+	new_size = round_up(new_size, 2);
+
+	if (p) {
+		memcpy(new_mem, ((char *)*p) + copy_start, copy_len);
+		kfree(*p);
+	}
+
+	*p = new_mem;
+	return new_size;
+}
+
+void xaprc00x_sock_transmit(int sock_id, void *data, int len)
+{
+	struct xaprc00x_pinfo *psk;
+	struct sock *sk;
+	int free_space;
+	int noshift_len;
+	int write_offset;
+
+	psk = (struct xaprc00x_pinfo *)xaprc00x_get_sock(sock_id);
+
+	/* This usually means the sock was shut down while in transit. */
+	if (!psk) {
+		pr_err("%s: Socket %d not found\n", __func__, sock_id);
+		return;
+	}
+
+	sk = &psk->sk;
+
+	lock_sock(sk);
+
+	/* How much space is currently in the buffer? */
+	free_space = psk->read_cache_size - psk->read_cache_bytes_used;
+
+	/* The length required to append the incoming data without shifting */
+	noshift_len =
+		psk->read_cache_offset + psk->read_cache_bytes_used + len;
+
+	/* If there is not enough space in the buffer, reallocate */
+	if (free_space < len) {
+		psk->read_cache_size =
+			xaprc00x_realloc_shift(
+				(void **)&psk->read_cache,
+				psk->read_cache_size + len,
+				GFP_KERNEL,
+				psk->read_cache_offset,
+				psk->read_cache_bytes_used);
+		psk->read_cache_offset = 0;
+	} else if (noshift_len > psk->read_cache_size) {
+		/**
+		 * If there is sufficient room but it isn't continuous then
+		 * move existing to the top.
+		 */
+		memcpy(psk->read_cache,
+			psk->read_cache + psk->read_cache_offset,
+			psk->read_cache_bytes_used);
+		psk->read_cache_offset = 0;
+	}
+
+	/* Append the incoming data immediately after the existing data */
+	write_offset = psk->read_cache_offset + psk->read_cache_bytes_used;
+	memcpy(psk->read_cache + write_offset, data, len);
+	psk->read_cache_bytes_used += len;
+
+	release_sock(sk);
+	sk->sk_data_ready(sk);
+}
+EXPORT_SYMBOL_GPL(xaprc00x_sock_transmit);
+
 /**
  * Funciton for sending a CONNECT
  */
@@ -223,11 +354,11 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 
 	state = atomic_read(&psk->state);
 
-	if (state == SCM_SYN_SENT)
+	if (state == SCM_SYN_SENT) {
 		ret = -EALREADY;
-	else if (state == SCM_ESTABLISHED)
+	} else if (state == SCM_ESTABLISHED) {
 		ret = -EISCONN;
-	else {
+	} else {
 		int new_status;
 		long timeo = sock_sndtimeo(sk, flags & O_NONBLOCK);
 
@@ -236,7 +367,7 @@ static int xaprc00x_sock_connect(struct socket *sock, struct sockaddr *addr,
 			g_proxy_context);
 
 		/* Exit immediately if asked not to block */
-		if(!timeo || !xaprc00x_wait_for_connect(sk, timeo)) {
+		if (!timeo || !xaprc00x_wait_for_connect(sk, timeo)) {
 			ret = -EINPROGRESS;
 			goto out;
 		}
@@ -277,7 +408,74 @@ out:
 static int xaprc00x_sock_sendmsg(struct socket *sock,
 				 struct msghdr *msg, size_t len)
 {
-	return -EAGAIN;
+	void *data;
+	int bytes_copied;
+	int bytes_sent;
+	struct xaprc00x_pinfo *psk;
+	struct sock *sk;
+
+	sk = sock->sk;
+	psk = (struct xaprc00x_pinfo *)sk;
+
+	/* If the sock has already been freed */
+	if (!sk) {
+		bytes_sent = -EPIPE;
+		goto out_nolock;
+	}
+
+	lock_sock(sk);
+
+	/* If outgoing transmissions have been shut down */
+	if (sk->sk_shutdown & SEND_SHUTDOWN) {
+		bytes_sent = -EPIPE;
+		goto out_release;
+	}
+
+	/* If not connected */
+	if (atomic_read(&psk->state) != SCM_ESTABLISHED) {
+		bytes_sent = -ENOTCONN;
+		goto out_release;
+	}
+
+	/* Copy the data over */
+	data = kmalloc(len, GFP_KERNEL);
+	bytes_copied = copy_from_iter(data, len, &msg->msg_iter);
+
+	/* This operation can be lengthy and we don't need the lock */
+	release_sock(sk);
+	bytes_sent = scm_proxy_write_socket(psk->local_id, data,
+		bytes_copied, g_proxy_context);
+	goto out_nolock;
+
+out_release:
+	release_sock(sk);
+out_nolock:
+	return bytes_sent;
+}
+
+static int xaprc00x_sock_wait_for_data(struct socket *sock,
+	int min_bytes, int timeo)
+{
+	struct xaprc00x_pinfo *psk;
+	struct sock *sk;
+
+	sk = sock->sk;
+	psk = (struct xaprc00x_pinfo *)sk;
+
+	DEFINE_WAIT_FUNC(wait, woken_wake_function);
+	add_wait_queue(sk_sleep(sk), &wait);
+
+	while (psk->read_cache_bytes_used < min_bytes) {
+		release_sock(sk);
+		timeo = wait_woken(&wait, TASK_INTERRUPTIBLE, timeo);
+		lock_sock(sk);
+
+		if (signal_pending(current) || !timeo)
+			break;
+	}
+
+	remove_wait_queue(sk_sleep(sk), &wait);
+	return timeo;
 }
 
 /**
@@ -286,33 +484,96 @@ static int xaprc00x_sock_sendmsg(struct socket *sock,
 static int xaprc00x_sock_recvmsg(struct socket *sock,
 				struct msghdr *msg, size_t size, int flags)
 {
-	return -EAGAIN;
+	struct xaprc00x_pinfo *psk;
+	int target;
+	long timeo;
+	struct sock *sk;
+	int ret = 0;
+
+	sk = sock->sk;
+	psk = (struct xaprc00x_pinfo *)sk;
+
+	lock_sock(sock->sk);
+
+	timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
+
+	/* Handle not having enough bytes to return immediately */
+	target = (flags & MSG_WAITALL) ? size : 1;
+	if (target > psk->read_cache_bytes_used &&
+		!(sk->sk_shutdown & RCV_SHUTDOWN)) {
+		/* Exit if we can't block or timed out before data came in */
+		if (!timeo && !xaprc00x_wait_for_connect(sk, timeo)) {
+			ret = -EWOULDBLOCK;
+			goto out;
+		}
+
+		xaprc00x_sock_wait_for_data(sock, target, timeo);
+
+		/* If interrupted the error is either -ERESTARTSYS or -EINTR */
+		if (signal_pending(current)) {
+			ret = sock_intr_errno(timeo);
+			goto out;
+		}
+	}
+
+	if (psk->read_cache_bytes_used > 0) {
+		/* Never return more bytes than requested */
+		ret = (psk->read_cache_bytes_used > size) ?
+			size : psk->read_cache_bytes_used;
+		copy_to_iter(psk->read_cache + psk->read_cache_offset,
+			ret, &msg->msg_iter);
+		psk->read_cache_bytes_used -= ret;
+		psk->read_cache_offset += ret;
+	}
+
+out:
+	release_sock(sock->sk);
+	return ret;
 }
 
 static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
 	poll_table *wait)
 {
 	struct xaprc00x_pinfo *psk;
+	struct sock *sk;
 	unsigned int mask;
+	int state;
 
-	psk = (struct xaprc00x_pinfo *)sock->sk;
+	sk = sock->sk;
+	psk = (struct xaprc00x_pinfo *)sk;
 	mask = 0;
 
 	sock_poll_wait(file, sk_sleep(sock->sk), wait);
 
+	state = atomic_read(&psk->state);
+
+	/* POLLHUP if and only if both sides are shut down. */
+	if (sk->sk_shutdown == SHUTDOWN_MASK && state == SCM_CLOSE) {
+		mask |= POLLHUP;
+		return mask;
+	}
+	if (sk->sk_shutdown & RCV_SHUTDOWN)
+		mask |= POLLIN | POLLRDNORM | POLLRDHUP;
+
+	/* Decide readability */
+	if (psk->read_cache_bytes_used > 0)
+		mask |= POLLIN | POLLRDNORM;
+
 	/* Connected sockets are always writable */
-	if (atomic_read(&psk->state) == SCM_ESTABLISHED)
+	if (state == SCM_ESTABLISHED)
 		mask |= POLLOUT | POLLWRNORM | POLLWRBAND;
 
 	return mask;
 }
+
 /**
  * Operation definitions for the psock type
  */
 static const struct proto_ops xaprc00x_ops = {
-	.family		= PF_PSOCK,
+	.family		= PF_SCM,
 	.owner		= THIS_MODULE,
-	.release	= xaprc00x_sock_release,
+	.release	= xaprc00x_sock_side_release,
+	.shutdown	= xaprc00x_sock_side_shutdown,
 	.bind		= sock_no_bind,
 	.connect	= xaprc00x_sock_connect,
 	.listen		= sock_no_listen,
@@ -320,7 +581,6 @@ static const struct proto_ops xaprc00x_ops = {
 	.getname	= sock_no_getname,
 	.sendmsg	= xaprc00x_sock_sendmsg,
 	.recvmsg	= xaprc00x_sock_recvmsg,
-	.shutdown	= xaprc00x_sock_shutdown,
 	.setsockopt	= sock_no_setsockopt,
 	.getsockopt	= sock_no_getsockopt,
 	.ioctl		= sock_no_ioctl,
@@ -339,15 +599,6 @@ static struct proto xaprc00x_proto = {
 };
 
 /**
- * Socket destruction
- */
-static void xaprc00x_sock_destruct(struct sock *sk)
-{
-	skb_queue_purge(&sk->sk_receive_queue);
-	skb_queue_purge(&sk->sk_write_queue);
-}
-
-/**
  * Allocate socket data
  */
 static struct sock *scm_sock_alloc(struct net *net, struct socket *sock,
@@ -355,16 +606,18 @@ static struct sock *scm_sock_alloc(struct net *net, struct socket *sock,
 {
 	struct sock *sk;
 
-	sk = sk_alloc(net, PF_PSOCK, prio, &xaprc00x_proto, kern);
+	sk = sk_alloc(net, PF_SCM, prio, &xaprc00x_proto, kern);
 	if (!sk)
 		goto exit;
 
 	sock_init_data(sock, sk);
 
-	sk->sk_destruct = xaprc00x_sock_destruct;
+	sk->sk_destruct = NULL;
 	sk->sk_sndtimeo = XAPRC00X_SK_SND_TIMEO;
 	sk->sk_sndbuf = XAPRC00X_SK_BUFF_SIZE;
 	sk->sk_rcvbuf = XAPRC00X_SK_BUFF_SIZE;
+
+	refcount_set(&sk->sk_refcnt, 1);
 
 	sock_reset_flag(sk, SOCK_ZAPPED);
 
@@ -377,7 +630,7 @@ static long xaprc00x_wait_for_create(struct sock *sk, long timeo)
 {
 	struct xaprc00x_pinfo *psk;
 
-	psk = (struct xaprc00x_pinfo *) sk;
+	psk = (struct xaprc00x_pinfo *)sk;
 
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	add_wait_queue(sk_sleep(sk), &wait);
@@ -415,7 +668,7 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 		goto out;
 	}
 
-	psk =  (struct xaprc00x_pinfo *) sk;
+	psk =  (struct xaprc00x_pinfo *)sk;
 	atomic_set(&psk->state, SCM_UNOPEN);
 
 	/* Create the socks entry in our table */
@@ -463,7 +716,7 @@ out:
  * Proto family definition
  */
 static const struct net_proto_family xaprc00x_family_ops = {
-	.family		= PF_PSOCK,
+	.family		= PF_SCM,
 	.owner		= THIS_MODULE,
 	.create		= scm_sock_create
 };
@@ -475,7 +728,7 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 	struct socket_wq *wq;
 
 	sk = xaprc00x_get_sock(sock_id);
-	psk = (struct xaprc00x_pinfo *) sk;
+	psk = (struct xaprc00x_pinfo *)sk;
 	wq = rcu_dereference(sk->sk_wq);
 
 	/* These should never happen */
@@ -504,7 +757,7 @@ EXPORT_SYMBOL_GPL(xaprc00x_sock_open_ack);
  * @proxy_context A pointer to the SCM proxy instance
  *
  * Initializes SCM socket protocol and remembers a pointer to the proxys
- * inst to send back whenver our driver calls the proxy.
+ * inst to send back whenever our driver calls the proxy.
  *
  * Returns: A pointer to the instance for this proxy.
  *
