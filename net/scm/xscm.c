@@ -108,6 +108,7 @@ int xaprc00x_sock_handle_shutdown(int sock_id)
 	psk = (struct xaprc00x_pinfo *) sk;
 
 	xaprc00x_sock_shutdown_internal(sk);
+	return 0;
 }
 EXPORT_SYMBOL_GPL(xaprc00x_sock_handle_shutdown);
 
