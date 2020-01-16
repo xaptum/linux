@@ -31,7 +31,7 @@ enum xaprc00x_state {
 	SCM_SYN_RECV, /* A connection request has been responded to but not processed */
 	SCM_CLOSING, /* Our side has closed, waiting for host */
 	SCM_CLOSE_WAIT, /* Remote has shut down and is waiting for us */
-	SCM_CLOSE, /* Close has been completed */
+	SCM_CLOSE, /* Close has been completed or open is in flight */
 
 	SCM_STATE_MAX
 };
@@ -39,7 +39,6 @@ struct xaprc00x_pinfo {
 	struct sock		sk;
 	int			local_id;
 	atomic_t		state; /* enum xaprc00x_state */
-	struct semaphore wait_sem;
 	struct scm_packet *wait_ack;
 	struct rhash_head hash;
 };
@@ -373,6 +372,27 @@ exit:
 	return sk;
 }
 
+static long xaprc00x_wait_for_create(struct sock *sk, long timeo)
+{
+	struct xaprc00x_pinfo *psk;
+
+	psk = (struct xaprc00x_pinfo *) sk;
+
+	DEFINE_WAIT_FUNC(wait, woken_wake_function);
+	add_wait_queue(sk_sleep(sk), &wait);
+
+	while (atomic_read(&psk->state) != SCM_UNOPEN) {
+		timeo = wait_woken(&wait, TASK_INTERRUPTIBLE, timeo);
+
+		/* If we were interrupted or hit the timeout */
+		if (signal_pending(current) || !timeo)
+			break;
+	}
+
+	remove_wait_queue(sk_sleep(sk), &wait);
+	return timeo;
+}
+
 /**
  * Create a socket for the psock type
  */
@@ -382,7 +402,7 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	struct sock *sk;
 	struct xaprc00x_pinfo *psk;
 	int ret;
-	int tmp_id;
+	long timeo;
 
 	sock->state = SS_UNCONNECTED;
 	sock->ops = &xaprc00x_ops;
@@ -391,24 +411,36 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	if (!sk) {
 		pr_err("scm_proxy: ENOMEM when creating socket\n");
 		ret = -ENOMEM;
-		goto exit;
+		goto out;
 	}
 
 	psk =  (struct xaprc00x_pinfo *) sk;
 	atomic_set(&psk->state, SCM_UNOPEN);
 
-	sema_init(&psk->wait_sem, 0);
-
 	/* Create the socks entry in our table */
 	psk->local_id = atomic_inc_return(&g_sock_id);
 	rhashtable_lookup_insert_fast(&g_scm_socket_table,
 		&psk->hash, ht_parms);
+	atomic_set(&psk->state, SCM_CLOSE);
 
 	/* Send the OPEN command to the proxy */
 	scm_proxy_open_socket(psk->local_id, g_proxy_context);
 
 	/* Block until we get an ACK */
-	down(&psk->wait_sem);
+	/* Blocking it assumed to be allowed for the time being */
+	timeo = sk->sk_sndtimeo;
+
+	/* Exit immediately if the block timed out */
+	if (!xaprc00x_wait_for_create(sk, timeo)) {
+		ret = -EINPROGRESS;
+		goto out;
+	}
+
+	/* If interrupted the error is either -ERESTARTSYS or -EINTR */
+	if (signal_pending(current)) {
+		ret = sock_intr_errno(timeo);
+		goto out;
+	}
 
 	/* Handle the ack and reinsert on success */
 	ret = psk->wait_ack->ack.code;
@@ -422,7 +454,7 @@ static int scm_sock_create(struct net *net, struct socket *sock, int protocol,
 	kfree(psk->wait_ack);
 	psk->wait_ack = NULL;
 
-exit:
+out:
 	return ret;
 }
 
@@ -437,25 +469,30 @@ static const struct net_proto_family xaprc00x_family_ops = {
 
 void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 {
-	struct xaprc00x_pinfo *pending_sock;
+	struct xaprc00x_pinfo *psk;
+	struct sock *sk;
+	struct socket_wq *wq;
 
-	pending_sock = (struct xaprc00x_pinfo *)
-		xaprc00x_get_sock(sock_id);
+	sk = xaprc00x_get_sock(sock_id);
+	psk = (struct xaprc00x_pinfo *) sk;
+	wq = rcu_dereference(sk->sk_wq);
 
 	/* These should never happen */
-	if (!pending_sock) {
+	if (!psk) {
 		pr_err("%s: Sock %d not found\n",
 			__func__, sock_id);
 		return;
 	}
-	if (pending_sock->wait_ack) {
+	if (psk->wait_ack) {
 		pr_err("%s: Sock %d busy\n",
 			__func__, sock_id);
 		return;
 	}
 
-	pending_sock->wait_ack = ack;
-	up(&pending_sock->wait_sem);
+	psk->wait_ack = ack;
+	atomic_set(&psk->state, SCM_UNOPEN);
+
+	wake_up_interruptible_all(&wq->wait);
 }
 EXPORT_SYMBOL_GPL(xaprc00x_sock_open_ack);
 
