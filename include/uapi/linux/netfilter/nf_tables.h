@@ -767,6 +767,18 @@ enum nft_payload_attributes {
 };
 #define NFTA_PAYLOAD_MAX	(__NFTA_PAYLOAD_MAX - 1)
 
+/**
+ * enum nft_inner_attributes - nf_tables inner expression netlink attributes
+ *
+ * @NFTA_INNER_FAMILY: inner packet family (NLA_U32)
+ */
+enum nft_inner_attributes {
+	NFTA_INNER_UNSPEC,
+	NFTA_INNER_FAMILY,
+	__NFTA_INNER_MAX
+};
+#define NFTA_INNER_MAX	(__NFTA_INNER_MAX - 1)
+
 enum nft_exthdr_flags {
 	NFT_EXTHDR_F_PRESENT = (1 << 0),
 };
