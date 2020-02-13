@@ -16,11 +16,15 @@ static unsigned int nft_do_chain_ipv4(void *priv,
 				      const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 	nft_set_pktinfo_ipv4(&pkt, skb);
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_ipv4 = {
@@ -60,11 +64,15 @@ static unsigned int nft_do_chain_arp(void *priv, struct sk_buff *skb,
 				     const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 	nft_set_pktinfo_unspec(&pkt, skb);
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_arp = {
@@ -100,11 +108,15 @@ static unsigned int nft_do_chain_ipv6(void *priv,
 				      const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 	nft_set_pktinfo_ipv6(&pkt, skb);
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_ipv6 = {
@@ -144,6 +156,7 @@ static unsigned int nft_do_chain_inet(void *priv, struct sk_buff *skb,
 				      const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 
@@ -158,7 +171,10 @@ static unsigned int nft_do_chain_inet(void *priv, struct sk_buff *skb,
 		break;
 	}
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_inet = {
@@ -200,6 +216,7 @@ nft_do_chain_bridge(void *priv,
 		    const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 
@@ -215,7 +232,10 @@ nft_do_chain_bridge(void *priv,
 		break;
 	}
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_bridge = {
@@ -255,6 +275,7 @@ static unsigned int nft_do_chain_netdev(void *priv, struct sk_buff *skb,
 					const struct nf_hook_state *state)
 {
 	struct nft_pktinfo pkt;
+	unsigned int ret;
 
 	nft_set_pktinfo(&pkt, skb, state);
 
@@ -270,7 +291,10 @@ static unsigned int nft_do_chain_netdev(void *priv, struct sk_buff *skb,
 		break;
 	}
 
-	return nft_do_chain(&pkt, priv);
+	ret = nft_do_chain(&pkt, priv);
+
+	nft_free_pktinfo(&pkt);
+	return ret;
 }
 
 static const struct nft_chain_type nft_chain_filter_netdev = {

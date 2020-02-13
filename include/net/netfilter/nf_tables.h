@@ -20,6 +20,7 @@ struct module;
 
 struct nft_pktinfo {
 	struct sk_buff			*skb;
+	struct sk_buff			*active_skb;
 	bool				tprot_set;
 	u8				tprot;
 	/* for x_tables compatibility */
@@ -56,6 +57,7 @@ static inline void nft_set_pktinfo(struct nft_pktinfo *pkt,
 				   const struct nf_hook_state *state)
 {
 	pkt->skb = skb;
+	pkt->active_skb = skb;
 	pkt->xt.state = state;
 }
 
@@ -66,6 +68,14 @@ static inline void nft_set_pktinfo_unspec(struct nft_pktinfo *pkt,
 	pkt->tprot = 0;
 	pkt->xt.thoff = 0;
 	pkt->xt.fragoff = 0;
+}
+
+static inline void nft_free_pktinfo(struct nft_pktinfo *pkt)
+{
+  if (pkt->active_skb != pkt->skb) {
+	kfree_skb(pkt->active_skb);
+	pkt->active_skb = pkt->skb;
+  }
 }
 
 /**
