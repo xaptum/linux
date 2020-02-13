@@ -76,7 +76,7 @@ static void nft_symhash_eval(const struct nft_expr *expr,
 			     const struct nft_pktinfo *pkt)
 {
 	struct nft_symhash *priv = nft_expr_priv(expr);
-	struct sk_buff *skb = pkt->skb;
+	struct sk_buff *skb = pkt->active_skb;
 	u32 h;
 
 	h = reciprocal_scale(__skb_get_hash_symmetric(skb), priv->modulus);
@@ -89,7 +89,7 @@ static void nft_symhash_map_eval(const struct nft_expr *expr,
 				 const struct nft_pktinfo *pkt)
 {
 	struct nft_symhash *priv = nft_expr_priv(expr);
-	struct sk_buff *skb = pkt->skb;
+	struct sk_buff *skb = pkt->active_skb;
 	const struct nft_set *map = priv->map;
 	const struct nft_set_ext *ext;
 	u32 result;

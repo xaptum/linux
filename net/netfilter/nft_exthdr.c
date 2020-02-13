@@ -41,11 +41,12 @@ static void nft_exthdr_ipv6_eval(const struct nft_expr *expr,
 				 const struct nft_pktinfo *pkt)
 {
 	struct nft_exthdr *priv = nft_expr_priv(expr);
+	struct sk_buff *skb = pkt->active_skb;
 	u32 *dest = &regs->data[priv->dreg];
 	unsigned int offset = 0;
 	int err;
 
-	err = ipv6_find_hdr(pkt->skb, &offset, priv->type, NULL, NULL);
+	err = ipv6_find_hdr(skb, &offset, priv->type, NULL, NULL);
 	if (priv->flags & NFT_EXTHDR_F_PRESENT) {
 		*dest = (err >= 0);
 		return;
@@ -55,7 +56,7 @@ static void nft_exthdr_ipv6_eval(const struct nft_expr *expr,
 	offset += priv->offset;
 
 	dest[priv->len / NFT_REG32_SIZE] = 0;
-	if (skb_copy_bits(pkt->skb, offset, dest, priv->len) < 0)
+	if (skb_copy_bits(skb, offset, dest, priv->len) < 0)
 		goto err;
 	return;
 err:
@@ -66,12 +67,13 @@ static void *
 nft_tcp_header_pointer(const struct nft_pktinfo *pkt,
 		       unsigned int len, void *buffer, unsigned int *tcphdr_len)
 {
+	struct sk_buff *skb = pkt->active_skb;
 	struct tcphdr *tcph;
 
 	if (!pkt->tprot_set || pkt->tprot != IPPROTO_TCP)
 		return NULL;
 
-	tcph = skb_header_pointer(pkt->skb, pkt->xt.thoff, sizeof(*tcph), buffer);
+	tcph = skb_header_pointer(skb, pkt->xt.thoff, sizeof(*tcph), buffer);
 	if (!tcph)
 		return NULL;
 
@@ -79,7 +81,7 @@ nft_tcp_header_pointer(const struct nft_pktinfo *pkt,
 	if (*tcphdr_len < sizeof(*tcph) || *tcphdr_len > len)
 		return NULL;
 
-	return skb_header_pointer(pkt->skb, pkt->xt.thoff, *tcphdr_len, buffer);
+	return skb_header_pointer(skb, pkt->xt.thoff, *tcphdr_len, buffer);
 }
 
 static void nft_exthdr_tcp_eval(const struct nft_expr *expr,
@@ -131,6 +133,7 @@ static void nft_exthdr_tcp_set_eval(const struct nft_expr *expr,
 {
 	u8 buff[sizeof(struct tcphdr) + MAX_TCP_OPTION_SPACE];
 	struct nft_exthdr *priv = nft_expr_priv(expr);
+	struct sk_buff *skb = pkt->active_skb;
 	unsigned int i, optl, tcphdr_len, offset;
 	struct tcphdr *tcph;
 	u8 *opt;
@@ -156,7 +159,7 @@ static void nft_exthdr_tcp_set_eval(const struct nft_expr *expr,
 		if (i + optl > tcphdr_len || priv->len + priv->offset > optl)
 			return;
 
-		if (!skb_make_writable(pkt->skb, pkt->xt.thoff + i + priv->len))
+		if (!skb_make_writable(skb, pkt->xt.thoff + i + priv->len))
 			return;
 
 		tcph = nft_tcp_header_pointer(pkt, sizeof(buff), buff,
@@ -184,7 +187,7 @@ static void nft_exthdr_tcp_set_eval(const struct nft_expr *expr,
 				return;
 
 			put_unaligned(new.v16, (u16*)(opt + offset));
-			inet_proto_csum_replace2(&tcph->check, pkt->skb,
+			inet_proto_csum_replace2(&tcph->check, skb,
 						 old.v16, new.v16, false);
 			break;
 		case 4:
@@ -195,7 +198,7 @@ static void nft_exthdr_tcp_set_eval(const struct nft_expr *expr,
 				return;
 
 			put_unaligned(new.v32, (u32*)(opt + offset));
-			inet_proto_csum_replace4(&tcph->check, pkt->skb,
+			inet_proto_csum_replace4(&tcph->check, skb,
 						 old.v32, new.v32, false);
 			break;
 		default:

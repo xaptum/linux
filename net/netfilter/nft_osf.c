@@ -17,7 +17,7 @@ static void nft_osf_eval(const struct nft_expr *expr, struct nft_regs *regs,
 {
 	struct nft_osf *priv = nft_expr_priv(expr);
 	u32 *dest = &regs->data[priv->dreg];
-	struct sk_buff *skb = pkt->skb;
+	struct sk_buff *skb = pkt->active_skb;
 	const struct tcphdr *tcp;
 	struct tcphdr _tcph;
 	const char *os_name;
