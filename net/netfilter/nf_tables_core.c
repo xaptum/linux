@@ -247,6 +247,7 @@ static struct nft_expr_type *nft_basic_types[] = {
 	&nft_meta_type,
 	&nft_rt_type,
 	&nft_exthdr_type,
+	&nft_inner_type,
 };
 
 int __init nf_tables_core_module_init(void)
