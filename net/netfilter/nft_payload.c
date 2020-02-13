@@ -83,7 +83,7 @@ void nft_payload_eval(const struct nft_expr *expr,
 		      const struct nft_pktinfo *pkt)
 {
 	const struct nft_payload *priv = nft_expr_priv(expr);
-	const struct sk_buff *skb = pkt->skb;
+	const struct sk_buff *skb = pkt->active_skb;
 	u32 *dest = &regs->data[priv->dreg];
 	int offset;
 
@@ -540,7 +540,7 @@ static void nft_payload_set_eval(const struct nft_expr *expr,
 				 const struct nft_pktinfo *pkt)
 {
 	const struct nft_payload_set *priv = nft_expr_priv(expr);
-	struct sk_buff *skb = pkt->skb;
+	struct sk_buff *skb = pkt->active_skb;
 	const u32 *src = &regs->data[priv->sreg];
 	int offset, csum_offset;
 	__wsum fsum, tsum;

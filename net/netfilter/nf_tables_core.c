@@ -63,7 +63,7 @@ static bool nft_payload_fast_eval(const struct nft_expr *expr,
 				  const struct nft_pktinfo *pkt)
 {
 	const struct nft_payload *priv = nft_expr_priv(expr);
-	const struct sk_buff *skb = pkt->skb;
+	const struct sk_buff *skb = pkt->active_skb;
 	u32 *dest = &regs->data[priv->dreg];
 	unsigned char *ptr;
 

@@ -315,7 +315,9 @@ void nft_meta_get_eval(const struct nft_expr *expr,
 		       const struct nft_pktinfo *pkt)
 {
 	const struct nft_meta *priv = nft_expr_priv(expr);
-	const struct sk_buff *skb = pkt->skb;
+	const struct sk_buff *skb = pkt->active_skb;
+	const struct net_device *in = nft_in(pkt), *out = nft_out(pkt);
+	struct sock *sk;
 	u32 *dest = &regs->data[priv->dreg];
 
 	switch (priv->key) {
@@ -424,7 +426,7 @@ void nft_meta_set_eval(const struct nft_expr *expr,
 		       const struct nft_pktinfo *pkt)
 {
 	const struct nft_meta *meta = nft_expr_priv(expr);
-	struct sk_buff *skb = pkt->skb;
+	struct sk_buff *skb = pkt->active_skb;
 	u32 *sreg = &regs->data[meta->sreg];
 	u32 value = *sreg;
 	u8 value8;
