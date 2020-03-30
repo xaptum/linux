@@ -51,20 +51,23 @@ struct f_scm {
 
 	struct usb_request	*req_in;
 	struct usb_request	*req_out;
+	struct usb_request	*req_bulk_out;
 
 	void *proxy_context;
 };
 
 /* Forward declarations */
-static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req);
+static void scm_send_int_msg_complete(struct usb_ep *ep, struct usb_request *req);
 static int scm_read_out_cmd(struct f_scm *scm_inst);
+static int scm_read_out_bulk(struct f_scm *scm_inst);
+void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst);
 
 /* Socket extern defs */
 extern int xaprc00x_register(void *proxy_context);
 extern void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet);
 extern void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
-extern int xaprc00x_sock_handle_shutdown(int sock_id);
-
+extern void xaprc00x_sock_transmit(int sock_id, void *data, int len);
+extern int xaprc00x_sock_handle_host_side_shutdown(int sock_id, int how);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.
@@ -476,7 +479,7 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 		goto exit_free_co;
 	}
 	scm->req_in->context = scm;
-	scm->req_in->complete = scm_send_msg_complete;
+	scm->req_in->complete = scm_send_int_msg_complete;
 
 	/* TODO use a better size than +64 */
 	scm->req_out = alloc_ep_req(scm->cmd_out, MAX_INT_PACKET_SIZE+64);
@@ -486,7 +489,15 @@ static int enable_scm(struct usb_composite_dev *cdev, struct f_scm *scm)
 		goto exit_free_ri;
 	}
 
+	scm->req_bulk_out = alloc_ep_req(scm->bulk_out, 2048);
+	if (!scm->req_bulk_out) {
+		ERROR(cdev, "alloc_ep_req for req_bulk_out failed");
+		result = -ENOMEM;
+		goto exit_free_ri;
+	}
+
 	scm_read_out_cmd(scm);
+	scm_read_out_bulk(scm);
 
 	goto exit;
 exit_free_ri:
@@ -648,11 +659,11 @@ module_init(f_scm_init);
 module_exit(f_scm_exit);
 
 /* Handle USB listening and writing */
-static void scm_send_msg_complete(struct usb_ep *ep, struct usb_request *req)
+static void scm_send_int_msg_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	kfree(req->buf);
 }
-static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
+static void scm_send_int_msg(void *data, int len, struct f_scm *scm_inst)
 {
 	struct usb_request *req = scm_inst->req_in;
 	int ret;
@@ -666,6 +677,31 @@ static void scm_send_msg(void *data, int len, struct f_scm *scm_inst)
 	ret = usb_ep_queue(scm_inst->cmd_in, scm_inst->req_in, GFP_ATOMIC);
 }
 
+static void scm_send_bulk_msg_complete(struct usb_ep *ep, struct usb_request *req)
+{
+	kfree(req->buf);
+	usb_ep_free_request(ep, req);
+}
+
+static void scm_send_bulk_msg(struct scm_packet_hdr *hdr, void *data, int len,
+	struct f_scm *scm_inst)
+{
+	struct usb_request *in_req;
+	void *usb_data;
+	int total_packet_len = sizeof(*hdr) + len;
+
+	in_req = usb_ep_alloc_request(scm_inst->bulk_in, GFP_KERNEL);
+	in_req->length = total_packet_len;
+	in_req->complete = scm_send_bulk_msg_complete;
+
+	usb_data = kmalloc(total_packet_len, GFP_KERNEL);
+	in_req->buf = usb_data;
+	memcpy(in_req->buf, hdr, sizeof(*hdr));
+	memcpy(in_req->buf + sizeof(*hdr), data, len);
+
+	usb_ep_queue(scm_inst->bulk_in, in_req, GFP_ATOMIC);
+}
+
 /* Reads SCM command from the host */
 static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 	struct f_scm *usb_context)
@@ -675,7 +711,7 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 	 * (checked in order to avoid reading bad memory)
 	 */
 	if (!packet || len < sizeof(*packet) ||
-		len < (sizeof(*packet)+packet->hdr.payload_len))
+		len > (sizeof(*packet)+packet->hdr.payload_len))
 		return;
 
 	/* Incoming command is either a close notificaiton or ACK */
@@ -685,7 +721,10 @@ static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
 		break;
 	case SCM_OP_CLOSE:
 		scm_proxy_recv_close(packet, usb_context->proxy_context);
+		break;
 	default:
+		pr_err("%s got unexpected packet %d",
+			__func__, packet->hdr.opcode);
 		break;
 	}
 }
@@ -709,6 +748,49 @@ static int scm_read_out_cmd(struct f_scm *scm_inst)
 	return 0;
 }
 
+static void scm_process_out_data(struct scm_packet *packet, size_t len,
+	struct f_scm *usb_context)
+{
+	/**
+	 *Make sure the packet is big enough for the packet and payload
+	 * (checked in order to avoid reading bad memory)
+	 */
+	if (!packet || len < sizeof(struct scm_packet_hdr) ||
+		len > (sizeof(struct scm_packet_hdr)+packet->hdr.payload_len)) {
+		return;
+	}
+
+	/* Incoming command is either a close notificaiton or ACK */
+	switch (packet->hdr.opcode) {
+	case SCM_OP_TRANSMIT:
+		scm_proxy_recv_transmit(packet, usb_context->proxy_context);
+		break;
+	default:
+		pr_err("%s got opcode %d", __func__, packet->hdr.opcode);
+		break;
+	}
+}
+static void scm_read_out_bulk_cb(struct usb_ep *ep, struct usb_request *req)
+{
+	if (req->buf) {
+		scm_process_out_data(req->buf, req->actual, req->context);
+		kfree(req->buf);
+	}
+	scm_read_out_bulk(req->context);
+}
+static int scm_read_out_bulk(struct f_scm *scm_inst)
+{
+	struct usb_request *out_bulk_req = scm_inst->req_bulk_out;
+
+	out_bulk_req->length = 2048;
+	out_bulk_req->buf = kmalloc(out_bulk_req->length, GFP_ATOMIC);
+	out_bulk_req->dma = 0;
+	out_bulk_req->complete = scm_read_out_bulk_cb;
+	out_bulk_req->context = scm_inst;
+	usb_ep_queue(scm_inst->bulk_out, out_bulk_req, GFP_ATOMIC);
+	return 0;
+}
+
 
 /* SCM Proxy */
 /* This definately has to be moved somewhere else */
@@ -724,6 +806,7 @@ struct scm_proxy_inst {
 	atomic_t scm_msg_id;
 	spinlock_t ack_list_lock;
 	struct workqueue_struct *ack_wq;
+	struct workqueue_struct *data_wq;
 	struct list_head ack_list;
 };
 
@@ -827,15 +910,31 @@ static void xaprc00x_proxy_process_connect_ack(struct work_struct *work)
 	kfree(work);
 }
 
+/**
+ * An incoming CLOSE packet means that the server has stopped talking to us so
+ * we run a shutdown on our end.
+ */
 static void xaprc00x_proxy_process_close(struct work_struct *work)
 {
 	struct scm_proxy_work *work_data;
 
-	work_data = (struct scm_proxy_work *)work;
-	xaprc00x_sock_handle_shutdown(work_data->packet->hdr.sock_id);
+	work_data = (struct scm_proxy_work *) work;
+	xaprc00x_sock_handle_host_side_shutdown(
+		work_data->packet->hdr.sock_id, 2);
+
 	/* Freed here becuase the handler has no use for the packet */
 	kfree(work_data->packet);
 	kfree(work_data);
+}
+
+static void xaprc00x_proxy_process_transmit(struct work_struct *work)
+{
+	struct scm_proxy_work *work_data;
+
+	work_data = (struct scm_proxy_work *)work;
+	xaprc00x_sock_transmit(work_data->packet->hdr.sock_id,
+		&work_data->packet->scm_payload_none,
+		work_data->packet->hdr.payload_len);
 }
 
 /* SCM Proxy API functions */
@@ -892,6 +991,42 @@ void scm_proxy_recv_ack(struct scm_packet *packet, void *inst)
 }
 EXPORT_SYMBOL_GPL(scm_proxy_recv_ack);
 
+void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst)
+{
+	struct scm_proxy_work *new_work;
+	struct scm_proxy_inst *proxy_inst;
+	int data_packet_len;
+	/* The work item will be cleared at thend of the job */
+
+	new_work = kmalloc(sizeof(*new_work), GFP_ATOMIC);
+
+	if (!new_work)
+		return;
+
+	new_work->proxy_context = inst;
+
+	/**
+	 * This packet will be freed when the socket no longer needs it
+	 * which may be after the workqueue is done
+	 */
+	data_packet_len = sizeof(struct scm_packet_hdr) +
+		packet->hdr.payload_len;
+	new_work->packet = kmalloc(
+		data_packet_len,
+		GFP_ATOMIC);
+	if (!new_work->packet) {
+		kfree(new_work);
+		return;
+	}
+	memcpy(new_work->packet, packet, data_packet_len);
+
+	proxy_inst = inst;
+
+	INIT_WORK(&new_work->work, xaprc00x_proxy_process_transmit);
+	queue_work(proxy_inst->data_wq, &new_work->work);
+}
+EXPORT_SYMBOL_GPL(scm_proxy_recv_transmit);
+
 /**
  * scm_proxy_recv_close - Recieves an CLOSE message
  *
@@ -947,6 +1082,7 @@ void *scm_proxy_init(void *usb_context)
 
 	/* Create a name that can contain the counter */
 	char scm_wq_name[sizeof("scm_wq_4294967296")];
+	char scm_data_wq_name[sizeof("scm_data_wq_4294967296")];
 
 	proxy_inst = kzalloc(sizeof(struct scm_proxy_inst), GFP_KERNEL);
 	if (!proxy_inst)
@@ -955,7 +1091,11 @@ void *scm_proxy_init(void *usb_context)
 
 	snprintf(scm_wq_name, sizeof(scm_wq_name), "scm_wq_%d",
 		atomic_inc_return(&g_proxy_counter));
+	snprintf(scm_wq_name, sizeof(scm_wq_name), "scm_data_wq_%d",
+		atomic_inc_return(&g_proxy_counter));
+
 	proxy_inst->ack_wq = create_workqueue(scm_wq_name);
+	proxy_inst->data_wq = create_workqueue(scm_data_wq_name);
 
 	spin_lock_init(&proxy_inst->ack_list_lock);
 	INIT_LIST_HEAD(&proxy_inst->ack_list);
@@ -1000,7 +1140,7 @@ int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
 	else if (addr->sa_family == AF_INET6)
 		scm_proxy_assign_ip6(packet, addr);
 
-	scm_send_msg(packet,
+	scm_send_int_msg(packet,
 		sizeof(struct scm_packet_hdr) + packet->hdr.payload_len,
 		proxy_inst->usb_context);
 
@@ -1040,7 +1180,7 @@ int scm_proxy_open_socket(int local_id, void *context)
 	packet->open.type = SCM_TYPE_STREAM;
 	packet->open.handle = local_id;
 
-	scm_send_msg(packet, sizeof(struct scm_packet),
+	scm_send_int_msg(packet, sizeof(struct scm_packet),
 		proxy_inst->usb_context);
 
 	return 0;
@@ -1071,9 +1211,27 @@ void scm_proxy_close_socket(int local_id, void *context)
 	packet->hdr.sock_id = local_id;
 	packet->hdr.payload_len = 0;
 
-	scm_send_msg(packet, sizeof(struct scm_packet_hdr),
+	scm_send_int_msg(packet, sizeof(struct scm_packet_hdr),
 		proxy_inst->usb_context);
 
 	kfree(packet);
 }
 EXPORT_SYMBOL_GPL(scm_proxy_close_socket);
+
+int scm_proxy_write_socket(int sock_id, void *msg, int len, void *context)
+{
+	struct scm_proxy_inst *proxy_inst;
+	struct scm_packet_hdr packet;
+
+	proxy_inst = context;
+
+	packet.opcode = SCM_OP_TRANSMIT;
+	packet.msg_id = scm_proxy_get_msg_id(context);
+	packet.sock_id = sock_id;
+	packet.payload_len = len;
+
+	scm_send_bulk_msg(&packet, msg, len,
+		proxy_inst->usb_context);
+	return len;
+}
+EXPORT_SYMBOL_GPL(scm_proxy_write_socket);
