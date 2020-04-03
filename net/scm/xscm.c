@@ -531,7 +531,7 @@ out:
 	return ret;
 }
 
-static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
+static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *socket,
 	poll_table *wait)
 {
 	struct xaprc00x_pinfo *psk;
@@ -539,11 +539,11 @@ static unsigned int xaprc00x_sock_poll(struct file *file, struct socket *sock,
 	unsigned int mask;
 	int state;
 
-	sk = sock->sk;
+	sk = socket->sk;
 	psk = (struct xaprc00x_pinfo *)sk;
 	mask = 0;
 
-	sock_poll_wait(file, sk_sleep(sock->sk), wait);
+	sock_poll_wait(file, socket, wait);
 
 	state = atomic_read(&psk->state);
 
