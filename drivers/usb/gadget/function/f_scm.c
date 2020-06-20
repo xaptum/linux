@@ -12,6 +12,7 @@
 #include <linux/mutex.h>
 #include <linux/net.h>
 #include <net/sock.h>
+#include <net/xscm.h>
 #include <linux/spinlock.h>
 
 #include "u_scm.h"
@@ -62,12 +63,6 @@ static int scm_read_out_cmd(struct f_scm *scm_inst);
 static int scm_read_out_bulk(struct f_scm *scm_inst);
 void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst);
 
-/* Socket extern defs */
-extern int xaprc00x_register(void *proxy_context);
-extern void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet);
-extern void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
-extern void xaprc00x_sock_transmit(int sock_id, void *data, int len);
-extern int xaprc00x_sock_handle_host_side_shutdown(int sock_id, int how);
 /*
  * The USB interface descriptor to tell the host
  * how many endpoints are being deviced, ect.

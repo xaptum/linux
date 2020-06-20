@@ -10,8 +10,8 @@
 #include <linux/rhashtable.h>
 #include <linux/sched/signal.h>
 #include <net/sock.h>
+#include <net/xscm.h>
 
-#include "xscm_extern.h"
 #define XAPRC00X_SK_BUFF_SIZE 512
 #define XAPRC00X_SK_SND_TIMEO (HZ * 30)
 
