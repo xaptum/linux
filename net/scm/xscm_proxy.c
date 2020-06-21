@@ -443,3 +443,60 @@ int scm_proxy_write_socket(int sock_id, void *msg, int len, void *context)
 		proxy_inst->usb_context);
 	return len;
 }
+
+
+
+/*
+ * Reads SCM command from the host
+ * Note: Called in an atomic context
+ */
+void scm_proxy_rcv_cmd(struct scm_packet *packet, size_t len,
+	void *proxy_context)
+{
+	/**
+	 *Make sure the packet is big enough for the packet and payload
+	 * (checked in order to avoid reading bad memory)
+	 */
+	if (!packet || len < sizeof(*packet) ||
+		len > (sizeof(*packet)+packet->hdr.payload_len))
+		return;
+
+	/* Incoming command is either a close notificaiton or ACK */
+	switch (packet->hdr.opcode) {
+	case SCM_OP_ACK:
+		scm_proxy_recv_ack(packet, proxy_context);
+		break;
+	case SCM_OP_CLOSE:
+		scm_proxy_recv_close(packet, proxy_context);
+		break;
+	default:
+		pr_err("%s got unexpected packet %d",
+			__func__, packet->hdr.opcode);
+		break;
+	}
+}
+EXPORT_SYMBOL_GPL(scm_proxy_rcv_cmd);
+
+void scm_proxy_rcv_data(struct scm_packet *packet, size_t len,
+	void *proxy_context)
+{
+	/**
+	 *Make sure the packet is big enough for the packet and payload
+	 * (checked in order to avoid reading bad memory)
+	 */
+	if (!packet || len < sizeof(struct scm_packet_hdr) ||
+		len > (sizeof(struct scm_packet_hdr)+packet->hdr.payload_len)) {
+		return;
+	}
+
+	/* Incoming command is either a close notificaiton or ACK */
+	switch (packet->hdr.opcode) {
+	case SCM_OP_TRANSMIT:
+		scm_proxy_recv_transmit(packet, proxy_context);
+		break;
+	default:
+		pr_err("%s got opcode %d", __func__, packet->hdr.opcode);
+		break;
+	}
+}
+EXPORT_SYMBOL_GPL(scm_proxy_rcv_data);

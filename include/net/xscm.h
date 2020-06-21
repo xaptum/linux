@@ -14,7 +14,5 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack);
 int xaprc00x_register(void *proxy_context);
 void *scm_proxy_init(void *usb_context, struct scm_usb_descriptor *intf);
 
-/* These need to be phased out */
-void scm_proxy_recv_ack(struct scm_packet *packet, void *inst);
-void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst);
-void scm_proxy_recv_close(struct scm_packet *packet, void *inst);
+void scm_proxy_rcv_data(struct scm_packet *packet, size_t len, void *proxy_ctx);
+void scm_proxy_rcv_cmd(struct scm_packet *packet, size_t len, void *proxy_ctx);

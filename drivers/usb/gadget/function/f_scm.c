@@ -706,42 +706,25 @@ static void scm_send_bulk_msg(struct scm_packet_hdr *hdr, char *data, size_t len
 
 	usb_ep_queue(scm_inst->bulk_in, in_req, GFP_ATOMIC);
 }
-
-/*
- * Reads SCM command from the host
- * Note: Called in an atomic context
- */
-static void scm_process_out_cmd(struct scm_packet *packet, size_t len,
-	struct f_scm *usb_context)
-{
-	/**
-	 *Make sure the packet is big enough for the packet and payload
-	 * (checked in order to avoid reading bad memory)
-	 */
-	if (!packet || len < sizeof(*packet) ||
-		len > (sizeof(*packet)+packet->hdr.payload_len))
-		return;
-
-	/* Incoming command is either a close notificaiton or ACK */
-	switch (packet->hdr.opcode) {
-	case SCM_OP_ACK:
-		scm_proxy_recv_ack(packet, usb_context->proxy_context);
-		break;
-	case SCM_OP_CLOSE:
-		scm_proxy_recv_close(packet, usb_context->proxy_context);
-		break;
-	default:
-		pr_err("%s got unexpected packet %d",
-			__func__, packet->hdr.opcode);
-		break;
-	}
-}
 static void scm_read_out_cmd_cb(struct usb_ep *ep, struct usb_request *req)
 {
-	if (req->buf)
-		scm_process_out_cmd(req->buf, req->actual, req->context);
+	if (req->buf) {
+		struct f_scm *ctx = (struct f_scm *)req->context;
+		scm_proxy_rcv_cmd(req->buf, req->actual, ctx->proxy_context);
+	}
 	scm_read_out_cmd(req->context);
 }
+
+static void scm_read_out_bulk_cb(struct usb_ep *ep, struct usb_request *req)
+{
+	if (req->buf) {
+		struct f_scm *ctx = (struct f_scm *)req->context;
+		scm_proxy_rcv_data(req->buf, req->actual, ctx->proxy_context);
+		kfree(req->buf);
+	}
+	scm_read_out_bulk(req->context);
+}
+
 static int scm_read_out_cmd(struct f_scm *scm_inst)
 {
 	struct usb_request *out_req = scm_inst->req_out;
@@ -756,36 +739,6 @@ static int scm_read_out_cmd(struct f_scm *scm_inst)
 	return 0;
 }
 
-static void scm_process_out_data(struct scm_packet *packet, size_t len,
-	struct f_scm *usb_context)
-{
-	/**
-	 *Make sure the packet is big enough for the packet and payload
-	 * (checked in order to avoid reading bad memory)
-	 */
-	if (!packet || len < sizeof(struct scm_packet_hdr) ||
-		len > (sizeof(struct scm_packet_hdr)+packet->hdr.payload_len)) {
-		return;
-	}
-
-	/* Incoming command is either a close notificaiton or ACK */
-	switch (packet->hdr.opcode) {
-	case SCM_OP_TRANSMIT:
-		scm_proxy_recv_transmit(packet, usb_context->proxy_context);
-		break;
-	default:
-		pr_err("%s got opcode %d", __func__, packet->hdr.opcode);
-		break;
-	}
-}
-static void scm_read_out_bulk_cb(struct usb_ep *ep, struct usb_request *req)
-{
-	if (req->buf) {
-		scm_process_out_data(req->buf, req->actual, req->context);
-		kfree(req->buf);
-	}
-	scm_read_out_bulk(req->context);
-}
 static int scm_read_out_bulk(struct f_scm *scm_inst)
 {
 	struct usb_request *out_bulk_req = scm_inst->req_bulk_out;
@@ -798,7 +751,6 @@ static int scm_read_out_bulk(struct f_scm *scm_inst)
 	usb_ep_queue(scm_inst->bulk_out, out_bulk_req, GFP_ATOMIC);
 	return 0;
 }
-
 
 MODULE_LICENSE("GPL v2");
 MODULE_AUTHOR("Daniel Berliner");
