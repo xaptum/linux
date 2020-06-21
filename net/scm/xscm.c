@@ -11,6 +11,7 @@
 #include <linux/sched/signal.h>
 #include <net/sock.h>
 #include <net/xscm.h>
+#include "xscm.h"
 
 #define XAPRC00X_SK_BUFF_SIZE 512
 #define XAPRC00X_SK_SND_TIMEO (HZ * 30)

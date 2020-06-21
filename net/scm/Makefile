@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 #
-# Makefile for the Linux X.25 Packet layer.
+# Makefile for the SCM network driver
 #
 
-obj-$(CONFIG_SCM) += xscm.o
+obj-$(CONFIG_SCM) += xscm.o xscm_proxy.o

@@ -13,14 +13,4 @@ struct f_scm_opts {
 	int refcnt;
 };
 
-/* SCM Proxy defs */
-
-void *scm_proxy_init(void *context);
-void scm_proxy_recv_ack(struct scm_packet *packet, void *context);
-void scm_proxy_recv_close(struct scm_packet *packet, void *inst);
-int scm_proxy_connect_socket(int local_id, struct sockaddr *addr, int alen,
-	void *context);
-int scm_proxy_open_socket(int local_id, void *context);
-void scm_proxy_close_socket(int local_id, void *context);
-
 #endif
