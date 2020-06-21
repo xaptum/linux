@@ -198,7 +198,6 @@ static void xaprc00x_proxy_process_transmit(struct work_struct *work)
 		break;
 	}
 }
-EXPORT_SYMBOL_GPL(scm_proxy_recv_ack);
 
 void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst)
 {
@@ -234,7 +233,6 @@ void scm_proxy_recv_transmit(struct scm_packet *packet, void *inst)
 	INIT_WORK(&new_work->work, xaprc00x_proxy_process_transmit);
 	queue_work(proxy_inst->data_wq, &new_work->work);
 }
-EXPORT_SYMBOL_GPL(scm_proxy_recv_transmit);
 
 /**
  * scm_proxy_recv_close - Recieves an CLOSE message
@@ -271,7 +269,6 @@ void scm_proxy_recv_close(struct scm_packet *packet, void *inst)
 	INIT_WORK(&new_work->work, xaprc00x_proxy_process_close);
 	queue_work(proxy_inst->ack_wq, &new_work->work);
 }
-EXPORT_SYMBOL_GPL(scm_proxy_recv_close);
 
 /**
  * scm_proxy_init - Initializes an instance of the SCM proxy

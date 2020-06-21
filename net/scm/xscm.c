@@ -134,7 +134,6 @@ int xaprc00x_sock_handle_host_side_shutdown(int sock_id, int how)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(xaprc00x_sock_handle_host_side_shutdown);
 
 static int xaprc00x_sock_side_release(struct socket *sock)
 {
@@ -213,7 +212,6 @@ void xaprc00x_sock_connect_ack(int sock_id, struct scm_packet *packet)
 	atomic_set(&psk->state, SCM_SYN_RECV);
 	wake_up_interruptible_all(&wq->wait);
 }
-EXPORT_SYMBOL_GPL(xaprc00x_sock_connect_ack);
 
 static long xaprc00x_wait_for_connect(struct sock *sk, long timeo)
 {
@@ -335,7 +333,6 @@ void xaprc00x_sock_transmit(int sock_id, void *data, int len)
 	release_sock(sk);
 	sk->sk_data_ready(sk);
 }
-EXPORT_SYMBOL_GPL(xaprc00x_sock_transmit);
 
 /**
  * Funciton for sending a CONNECT
@@ -749,7 +746,6 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 
 	wake_up_interruptible_all(&wq->wait);
 }
-EXPORT_SYMBOL_GPL(xaprc00x_sock_open_ack);
 
 /**
  * xaprc00x_register - Initializes the socket type and registers the calling
@@ -798,13 +794,11 @@ clear_context:
 exit:
 	return err;
 }
-EXPORT_SYMBOL_GPL(xaprc00x_register);
 
 struct sock *xaprc00x_get_sock(int key)
 {
 	return rhashtable_lookup_fast(&g_scm_socket_table, &key, ht_parms);
 }
-EXPORT_SYMBOL_GPL(xaprc00x_get_sock);
 
 /**
  * Cleanup and unregister registred types
