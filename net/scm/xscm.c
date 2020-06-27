@@ -727,7 +727,6 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 
 	sk = xaprc00x_get_sock(sock_id);
 	psk = (struct xaprc00x_pinfo *)sk;
-	wq = rcu_dereference(sk->sk_wq);
 
 	/* These should never happen */
 	if (!psk) {
@@ -744,6 +743,7 @@ void xaprc00x_sock_open_ack(int sock_id, struct scm_packet *ack)
 	psk->wait_ack = ack;
 	atomic_set(&psk->state, SCM_UNOPEN);
 
+	wq = rcu_dereference(sk->sk_wq);
 	wake_up_interruptible_all(&wq->wait);
 }
 
