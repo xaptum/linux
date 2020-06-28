@@ -1,6 +1,0 @@
-#
-# SCM Network Support
-#
-
-config SCM
-	bool "SCM Network Device Support"
