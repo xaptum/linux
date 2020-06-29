@@ -62,7 +62,7 @@ source "net/unix/Kconfig"
 source "net/tls/Kconfig"
 source "net/xfrm/Kconfig"
 source "net/iucv/Kconfig"
-source "net/scm/Kconfig"
+source "net/hss/Kconfig"
 source "net/smc/Kconfig"
 source "net/xdp/Kconfig"
 
