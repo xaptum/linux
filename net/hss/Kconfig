@@ -1,6 +1,0 @@
-#
-# SCM Network Support
-#
-
-config HSS
-	bool "HSS Network Device Support"
